@@ -1,50 +1,85 @@
-# Welcome to your Expo app 👋
+# 🎓 Kids Pronunciation Learning App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+An interactive pronunciation learning app for children ages 2-7 with a 3D animated character, speech recognition, and encouraging feedback.
 
-## Get started
+## ✨ Features
 
-1. Install dependencies
+- 🤖 **3D Animated Character** - Cute alien that moves and celebrates with you
+- 🗣️ **Text-to-Speech** - Character speaks words and encourages kids
+- 🎤 **Audio Recording** - Records pronunciation attempts
+- 📊 **Progress Tracking** - Saves achievements and daily streaks
+- 🎨 **Child-Friendly UI** - Vibrant colors, large buttons, fun animations
+- 📚 **10 Starter Words** - From "apple" to "juice" with phonetic guides
 
-   ```bash
-   npm install
-   ```
+## 🚀 Quick Start
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
+### Install Dependencies
 ```bash
-npm run reset-project
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### Run on Your Phone
+```bash
+npx expo start
+```
+Scan the QR code with Expo Go app on your phone.
 
-## Learn more
+### Run on Emulator
+```bash
+npx expo run:android  # Android
+npx expo run:ios      # iOS
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+> **Note:** Test on a physical device for best 3D rendering and microphone performance!
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## 📱 How It Works
 
-## Join the community
+1. **Character introduces a word** (e.g., "This is apple. Apple.")
+2. **Character asks child to repeat** ("Now you try! Say apple.")
+3. **Child taps the microphone button** and speaks
+4. **App analyzes pronunciation** and gives encouraging feedback
+5. **Success!** Character celebrates, or encourages another try
 
-Join our community of developers creating universal apps.
+## 🎯 Current Status
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+**✅ Fully Functional:**
+- 3D character rendering and animations
+- Text-to-speech with child-friendly voice
+- Audio recording
+- Progress tracking
+- Complete learning flow
+
+**⏳ In Progress:**
+- Speech recognition currently uses simulated accuracy
+- Ready for Wav2Vec2 ONNX model integration for real phoneme detection
+
+## 📁 Key Files
+
+- `app/(tabs)/learn.tsx` - Main learning screen
+- `components/Character3D.tsx` - 3D character component
+- `services/textToSpeech.ts` - TTS service
+- `services/progressTracker.ts` - Progress tracking
+- `data/learningWords.ts` - Word database
+
+## 🔧 Next Steps
+
+1. Integrate Wav2Vec2 ONNX model for real speech recognition
+2. Add more words and difficulty levels
+3. Implement lip-sync for character
+4. Create parent dashboard
+
+## 📖 Documentation
+
+See [walkthrough.md](../../../.gemini/antigravity/brain/76f4df94-add1-4c5a-b4c8-356cf2d600fc/walkthrough.md) for detailed documentation.
+
+## 🎨 Tech Stack
+
+- React Native + Expo
+- Three.js for 3D graphics
+- expo-speech for TTS
+- expo-av for audio recording
+- AsyncStorage for progress tracking
+
+---
+
+Built with ❤️ for kids learning pronunciation!
