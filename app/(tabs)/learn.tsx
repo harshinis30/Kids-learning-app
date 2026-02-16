@@ -13,6 +13,7 @@ import { RecordButton } from '../../components/RecordButton';
 import { Scene3D } from '../../components/Scene3D';
 import { ChildTheme } from '../../constants/ChildTheme';
 import { LearningWord, getRandomWord } from '../../data/learningWords';
+import { LipSyncAnimation } from '../../services/lipSyncService';
 import { progressTracker } from '../../services/progressTracker';
 import { ttsService } from '../../services/textToSpeech';
 
@@ -32,6 +33,10 @@ export default function LearnScreen() {
     const [accuracy, setAccuracy] = useState<number>(0);
     const [feedbackMessage, setFeedbackMessage] = useState<string>('');
     const [animationType, setAnimationType] = useState<'idle' | 'speaking' | 'celebrating' | 'encouraging'>('idle');
+
+    // Lip-sync animation state
+    const [lipSyncAnimation, setLipSyncAnimation] = useState<LipSyncAnimation | null>(null);
+    const [currentAnimationTime, setCurrentAnimationTime] = useState<number>(0);
 
     // Request audio permissions on mount
     useEffect(() => {
@@ -53,14 +58,28 @@ export default function LearnScreen() {
         // Step 1: Introduce the word
         setLearningState('introduce');
         setAnimationType('speaking');
-        await ttsService.speakWordIntroduction(currentWord.word);
+        await ttsService.speakWordIntroduction(currentWord.word, {
+            onAnimationStart: (animation) => setLipSyncAnimation(animation),
+            onAnimationUpdate: (time) => setCurrentAnimationTime(time),
+            onAnimationEnd: () => {
+                setLipSyncAnimation(null);
+                setCurrentAnimationTime(0);
+            },
+        });
 
         // Small pause
         await new Promise(resolve => setTimeout(resolve, 500));
 
         // Step 2: Prompt child to repeat
         setLearningState('prompt');
-        await ttsService.askToRepeat(currentWord.word);
+        await ttsService.askToRepeat(currentWord.word, {
+            onAnimationStart: (animation) => setLipSyncAnimation(animation),
+            onAnimationUpdate: (time) => setCurrentAnimationTime(time),
+            onAnimationEnd: () => {
+                setLipSyncAnimation(null);
+                setCurrentAnimationTime(0);
+            },
+        });
 
         // Step 3: Ready to listen
         setLearningState('listen');
@@ -126,17 +145,38 @@ export default function LearnScreen() {
         if (isSuccess) {
             setAnimationType('celebrating');
             setFeedbackMessage('Amazing! Perfect pronunciation! 🎉');
-            await ttsService.celebrateSuccess();
+            await ttsService.celebrateSuccess({
+                onAnimationStart: (animation) => setLipSyncAnimation(animation),
+                onAnimationUpdate: (time) => setCurrentAnimationTime(time),
+                onAnimationEnd: () => {
+                    setLipSyncAnimation(null);
+                    setCurrentAnimationTime(0);
+                },
+            });
             await progressTracker.recordAttempt(currentWord.id, simulatedAccuracy, true);
         } else if (isPartial) {
             setAnimationType('encouraging');
             setFeedbackMessage('Good try! Let\'s practice more! 👍');
-            await ttsService.encourageRetry();
+            await ttsService.encourageRetry(undefined, {
+                onAnimationStart: (animation) => setLipSyncAnimation(animation),
+                onAnimationUpdate: (time) => setCurrentAnimationTime(time),
+                onAnimationEnd: () => {
+                    setLipSyncAnimation(null);
+                    setCurrentAnimationTime(0);
+                },
+            });
             await progressTracker.recordAttempt(currentWord.id, simulatedAccuracy, false);
         } else {
             setAnimationType('encouraging');
             setFeedbackMessage('Keep trying! You can do it! 💪');
-            await ttsService.encourageRetry('Try to say it slowly');
+            await ttsService.encourageRetry('Try to say it slowly', {
+                onAnimationStart: (animation) => setLipSyncAnimation(animation),
+                onAnimationUpdate: (time) => setCurrentAnimationTime(time),
+                onAnimationEnd: () => {
+                    setLipSyncAnimation(null);
+                    setCurrentAnimationTime(0);
+                },
+            });
             await progressTracker.recordAttempt(currentWord.id, simulatedAccuracy, false);
         }
 
@@ -185,6 +225,8 @@ export default function LearnScreen() {
                     <Scene3D
                         isAnimating={learningState === 'recording' || learningState === 'analyzing'}
                         animationType={animationType}
+                        lipSyncAnimation={lipSyncAnimation}
+                        currentAnimationTime={currentAnimationTime}
                     />
                 </View>
 
