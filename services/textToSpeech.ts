@@ -59,24 +59,30 @@ class TextToSpeechService {
                     onDone: () => {
                         this.isSpeaking = false;
                         this.stopAnimation();
-                        if (onAnimationEnd) {
-                            onAnimationEnd();
-                        }
+                        if (onAnimationEnd) onAnimationEnd();
+                        resolve();
+                    },
+                    onStopped: () => {
+                        this.isSpeaking = false;
+                        this.stopAnimation();
+                        if (onAnimationEnd) onAnimationEnd();
                         resolve();
                     },
                     onError: (error) => {
+                        // Resolve (not reject) to prevent app crash
+                        console.warn('TTS error (non-fatal):', error);
                         this.isSpeaking = false;
                         this.stopAnimation();
-                        if (onAnimationEnd) {
-                            onAnimationEnd();
-                        }
-                        reject(error);
+                        if (onAnimationEnd) onAnimationEnd();
+                        resolve();
                     },
                 });
             } catch (error) {
+                console.warn('TTS exception (non-fatal):', error);
                 this.isSpeaking = false;
                 this.stopAnimation();
-                reject(error);
+                if (onAnimationEnd) onAnimationEnd();
+                resolve();
             }
         });
     }

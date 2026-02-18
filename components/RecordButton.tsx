@@ -1,6 +1,5 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { ChildTheme } from '../constants/ChildTheme';
 
 interface RecordButtonProps {
     onPress: () => void;
@@ -15,36 +14,68 @@ export function RecordButton({
     isProcessing,
     disabled = false
 }: RecordButtonProps) {
-    const scaleAnim = React.useRef(new Animated.Value(1)).current;
+    const scaleAnim = useRef(new Animated.Value(1)).current;
+    const rippleAnim = useRef(new Animated.Value(0)).current;
+    const rotateAnim = useRef(new Animated.Value(0)).current;
 
-    React.useEffect(() => {
+    useEffect(() => {
         if (isRecording) {
             // Pulse animation while recording
             Animated.loop(
                 Animated.sequence([
                     Animated.timing(scaleAnim, {
-                        toValue: 1.1,
-                        duration: 500,
+                        toValue: 1.08,
+                        duration: 600,
                         useNativeDriver: true,
                     }),
                     Animated.timing(scaleAnim, {
                         toValue: 1,
-                        duration: 500,
+                        duration: 600,
+                        useNativeDriver: true,
+                    }),
+                ])
+            ).start();
+
+            // Ripple effect
+            Animated.loop(
+                Animated.sequence([
+                    Animated.timing(rippleAnim, {
+                        toValue: 1,
+                        duration: 1500,
+                        useNativeDriver: true,
+                    }),
+                    Animated.timing(rippleAnim, {
+                        toValue: 0,
+                        duration: 0,
                         useNativeDriver: true,
                     }),
                 ])
             ).start();
         } else {
             scaleAnim.setValue(1);
+            rippleAnim.setValue(0);
         }
-    }, [isRecording]);
+
+        if (isProcessing) {
+            // Rotate animation while processing
+            Animated.loop(
+                Animated.timing(rotateAnim, {
+                    toValue: 1,
+                    duration: 2000,
+                    useNativeDriver: true,
+                })
+            ).start();
+        } else {
+            rotateAnim.setValue(0);
+        }
+    }, [isRecording, isProcessing]);
 
     const handlePress = () => {
         if (!disabled && !isProcessing) {
             // Tap animation
             Animated.sequence([
                 Animated.timing(scaleAnim, {
-                    toValue: 0.9,
+                    toValue: 0.92,
                     duration: 100,
                     useNativeDriver: true,
                 }),
@@ -59,6 +90,39 @@ export function RecordButton({
         }
     };
 
+    const rippleScale = rippleAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 1.5],
+    });
+
+    const rippleOpacity = rippleAnim.interpolate({
+        inputRange: [0, 0.5, 1],
+        outputRange: [0.6, 0.3, 0],
+    });
+
+    const rotation = rotateAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '360deg'],
+    });
+
+    const getButtonColor = () => {
+        if (isProcessing) return '#9333EA';
+        if (isRecording) return '#EF4444';
+        return '#10B981';
+    };
+
+    const getButtonText = () => {
+        if (isProcessing) return 'Listening...';
+        if (isRecording) return 'Stop';
+        return 'Speak';
+    };
+
+    const getEmoji = () => {
+        if (isProcessing) return '⏳';
+        if (isRecording) return '⏹️';
+        return '🎤';
+    };
+
     return (
         <TouchableOpacity
             onPress={handlePress}
@@ -66,37 +130,52 @@ export function RecordButton({
             activeOpacity={0.8}
             style={styles.container}
         >
+            {/* Ripple effect */}
+            {isRecording && (
+                <Animated.View
+                    style={[
+                        styles.ripple,
+                        {
+                            transform: [{ scale: rippleScale }],
+                            opacity: rippleOpacity,
+                            backgroundColor: getButtonColor(),
+                        },
+                    ]}
+                />
+            )}
+
+            {/* Main button */}
             <Animated.View
                 style={[
                     styles.button,
                     {
-                        transform: [{ scale: scaleAnim }],
-                        opacity: disabled || isProcessing ? 0.5 : 1,
+                        transform: [
+                            { scale: scaleAnim },
+                            { rotate: isProcessing ? rotation : '0deg' },
+                        ],
+                        opacity: disabled ? 0.5 : 1,
+                        backgroundColor: getButtonColor(),
                     },
                 ]}
             >
-                <View
-                    style={[
-                        styles.buttonInner,
-                        {
-                            backgroundColor: isRecording
-                                ? ChildTheme.colors.warning
-                                : ChildTheme.colors.buttonPrimary,
-                        },
-                    ]}
-                >
-                    <Text style={styles.emoji}>
-                        {isProcessing ? '⏳' : isRecording ? '🎤' : '🎙️'}
-                    </Text>
-                    <Text style={styles.text}>
-                        {isProcessing
-                            ? 'Listening...'
-                            : isRecording
-                                ? 'Recording'
-                                : 'Tap to Speak'}
-                    </Text>
+                <View style={styles.buttonInner}>
+                    <Text style={styles.emoji}>{getEmoji()}</Text>
+                    <Text style={styles.text}>{getButtonText()}</Text>
                 </View>
+
+                {/* Decorative ring */}
+                <View style={styles.decorativeRing} />
             </Animated.View>
+
+            {/* Glow effect */}
+            <View
+                style={[
+                    styles.glow,
+                    {
+                        shadowColor: getButtonColor(),
+                    },
+                ]}
+            />
         </TouchableOpacity>
     );
 }
@@ -106,27 +185,65 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    ripple: {
+        position: 'absolute',
+        width: 160,
+        height: 160,
+        borderRadius: 80,
+    },
     button: {
-        width: 140,
-        height: 140,
-        borderRadius: 70,
-        ...ChildTheme.shadows.large,
+        width: 160,
+        height: 160,
+        borderRadius: 80,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.3,
+        shadowRadius: 16,
+        elevation: 12,
     },
     buttonInner: {
         flex: 1,
-        borderRadius: 70,
+        borderRadius: 80,
         alignItems: 'center',
         justifyContent: 'center',
-        padding: ChildTheme.spacing.md,
+        padding: 20,
+        borderWidth: 4,
+        borderColor: 'rgba(255, 255, 255, 0.3)',
+    },
+    decorativeRing: {
+        position: 'absolute',
+        top: -6,
+        left: -6,
+        right: -6,
+        bottom: -6,
+        borderRadius: 86,
+        borderWidth: 3,
+        borderColor: 'rgba(255, 255, 255, 0.2)',
     },
     emoji: {
-        fontSize: 48,
-        marginBottom: ChildTheme.spacing.xs,
+        fontSize: 56,
+        marginBottom: 8,
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 4,
     },
     text: {
-        color: ChildTheme.colors.textLight,
-        fontSize: ChildTheme.fontSize.md,
-        fontWeight: 'bold',
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '800',
         textAlign: 'center',
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2,
+        letterSpacing: 0.5,
+    },
+    glow: {
+        position: 'absolute',
+        width: 160,
+        height: 160,
+        borderRadius: 80,
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.6,
+        shadowRadius: 24,
     },
 });

@@ -1,249 +1,429 @@
 import { Audio } from 'expo-av';
-import React, { useEffect, useState } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+    Animated,
     Dimensions,
     SafeAreaView,
     StyleSheet,
     Text,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
+import { ConfettiOverlay } from '../../components/ConfettiOverlay';
 import { FeedbackDisplay } from '../../components/FeedbackDisplay';
 import { RecordButton } from '../../components/RecordButton';
 import { Scene3D } from '../../components/Scene3D';
-import { ChildTheme } from '../../constants/ChildTheme';
-import { LearningWord, getRandomWord } from '../../data/learningWords';
+import { SessionSummary } from '../../components/SessionSummary';
+import { StarRating } from '../../components/StarRating';
+import { CurriculumItem, STAGE_NAMES, getStageItems } from '../../data/curriculum';
 import { LipSyncAnimation } from '../../services/lipSyncService';
+import { problemTracker } from '../../services/problemTracker';
+import { ChildProfile, profileService } from '../../services/profileService';
 import { progressTracker } from '../../services/progressTracker';
 import { ttsService } from '../../services/textToSpeech';
 
-type LearningState =
-    | 'introduce'    // Character shows and pronounces word
-    | 'prompt'       // Character asks child to repeat
-    | 'listen'       // Waiting for child to speak
-    | 'recording'    // Recording audio
-    | 'analyzing'    // Processing pronunciation
-    | 'feedback';    // Showing results
+type LearningState = 'loading' | 'introduce' | 'prompt' | 'listen' | 'recording' | 'analyzing' | 'feedback';
+
+const { width, height } = Dimensions.get('window');
+const SESSION_LENGTH = 5; // Show summary every 5 items
+
+function computeStars(accuracy: number): number {
+    if (accuracy >= 90) return 3;
+    if (accuracy >= 70) return 2;
+    if (accuracy >= 50) return 1;
+    return 0;
+}
 
 export default function LearnScreen() {
-    const [currentWord, setCurrentWord] = useState<LearningWord>(getRandomWord());
-    const [learningState, setLearningState] = useState<LearningState>('introduce');
+    const [profile, setProfile] = useState<ChildProfile | null>(null);
+    const [items, setItems] = useState<CurriculumItem[]>([]);
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const [learningState, setLearningState] = useState<LearningState>('loading');
     const [recording, setRecording] = useState<Audio.Recording | null>(null);
-    const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-    const [accuracy, setAccuracy] = useState<number>(0);
-    const [feedbackMessage, setFeedbackMessage] = useState<string>('');
+    const [accuracy, setAccuracy] = useState(0);
+    const [stars, setStars] = useState(0);
+    const [feedbackMessage, setFeedbackMessage] = useState('');
     const [animationType, setAnimationType] = useState<'idle' | 'speaking' | 'celebrating' | 'encouraging'>('idle');
+    const [attemptCount, setAttemptCount] = useState(0);
+    const [showConfetti, setShowConfetti] = useState(false);
+    const [showHint, setShowHint] = useState(false);
 
-    // Lip-sync animation state
+    // Session tracking
+    const [sessionStars, setSessionStars] = useState(0);
+    const [sessionItems, setSessionItems] = useState(0);
+    const [sessionBest, setSessionBest] = useState<{ text: string; stars: number } | undefined>();
+    const [showSummary, setShowSummary] = useState(false);
+    const sessionStartTime = useRef(Date.now());
+
+    // Lip-sync
     const [lipSyncAnimation, setLipSyncAnimation] = useState<LipSyncAnimation | null>(null);
-    const [currentAnimationTime, setCurrentAnimationTime] = useState<number>(0);
+    const [currentAnimationTime, setCurrentAnimationTime] = useState(0);
 
-    // Request audio permissions on mount
+    // Animations
+    const cardScale = useRef(new Animated.Value(0)).current;
+    const cardOpacity = useRef(new Animated.Value(0)).current;
+    const pulseAnim = useRef(new Animated.Value(1)).current;
+    const headerFade = useRef(new Animated.Value(0)).current;
+
+    const currentItem = items[currentIndex];
+
+    // ── Load profile & curriculum ──────────────────────────────────────────
     useEffect(() => {
         (async () => {
             await Audio.requestPermissionsAsync();
-            await Audio.setAudioModeAsync({
-                allowsRecordingIOS: true,
-                playsInSilentModeIOS: true,
-            });
+            await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+
+            const p = await profileService.getActiveProfile();
+            if (!p) return;
+            setProfile(p);
+
+            const stageItems = getStageItems(p.ageGroup, p.currentStage as 1 | 2 | 3 | 4);
+            // Shuffle items for variety
+            const shuffled = [...stageItems].sort(() => Math.random() - 0.5);
+            setItems(shuffled);
+
+            Animated.timing(headerFade, { toValue: 1, duration: 500, useNativeDriver: true }).start();
+            setLearningState('introduce');
         })();
     }, []);
 
-    // Start the learning flow when component mounts or word changes
+    // ── Start flow when item changes ───────────────────────────────────────
     useEffect(() => {
-        startLearningFlow();
-    }, [currentWord]);
+        if (learningState !== 'loading' && currentItem) {
+            startItemFlow();
+        }
+    }, [currentIndex, items]);
 
-    const startLearningFlow = async () => {
-        // Step 1: Introduce the word
+    // ── Card entrance animation ────────────────────────────────────────────
+    useEffect(() => {
+        if (currentItem) {
+            cardScale.setValue(0);
+            cardOpacity.setValue(0);
+            Animated.parallel([
+                Animated.spring(cardScale, { toValue: 1, friction: 8, tension: 40, useNativeDriver: true }),
+                Animated.timing(cardOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+            ]).start();
+        }
+    }, [currentItem]);
+
+    // ── Pulse animation for listen state ──────────────────────────────────
+    useEffect(() => {
+        if (learningState === 'listen') {
+            Animated.loop(
+                Animated.sequence([
+                    Animated.timing(pulseAnim, { toValue: 1.06, duration: 900, useNativeDriver: true }),
+                    Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
+                ])
+            ).start();
+        } else {
+            pulseAnim.setValue(1);
+        }
+    }, [learningState]);
+
+    const lipSyncCallbacks = {
+        onAnimationStart: (anim: LipSyncAnimation) => setLipSyncAnimation(anim),
+        onAnimationUpdate: (t: number) => setCurrentAnimationTime(t),
+        onAnimationEnd: () => { setLipSyncAnimation(null); setCurrentAnimationTime(0); },
+    };
+
+    const startItemFlow = async () => {
+        if (!currentItem) return;
+        setAttemptCount(0);
+        setShowHint(false);
         setLearningState('introduce');
         setAnimationType('speaking');
-        await ttsService.speakWordIntroduction(currentWord.word, {
-            onAnimationStart: (animation) => setLipSyncAnimation(animation),
-            onAnimationUpdate: (time) => setCurrentAnimationTime(time),
-            onAnimationEnd: () => {
-                setLipSyncAnimation(null);
-                setCurrentAnimationTime(0);
-            },
-        });
 
-        // Small pause
-        await new Promise(resolve => setTimeout(resolve, 500));
+        const introText = currentItem.type === 'sound'
+            ? `This sound is "${currentItem.text}". Listen carefully: ${currentItem.text}.`
+            : currentItem.type === 'syllable'
+                ? `This syllable is "${currentItem.text}". Say it with me: ${currentItem.text}.`
+                : `This word is "${currentItem.text}". ${currentItem.text}.`;
 
-        // Step 2: Prompt child to repeat
+        await ttsService.speak(introText, { rate: 0.65, ...lipSyncCallbacks });
+        await delay(400);
+
         setLearningState('prompt');
-        await ttsService.askToRepeat(currentWord.word, {
-            onAnimationStart: (animation) => setLipSyncAnimation(animation),
-            onAnimationUpdate: (time) => setCurrentAnimationTime(time),
-            onAnimationEnd: () => {
-                setLipSyncAnimation(null);
-                setCurrentAnimationTime(0);
-            },
-        });
+        const promptText = currentItem.type === 'sound'
+            ? `Now you try! Make the "${currentItem.text}" sound.`
+            : `Now you try! Say "${currentItem.text}".`;
+        await ttsService.speak(promptText, { rate: 0.7, ...lipSyncCallbacks });
 
-        // Step 3: Ready to listen
         setLearningState('listen');
         setAnimationType('idle');
     };
 
     const handleRecordPress = async () => {
-        if (learningState === 'listen') {
-            // Start recording
-            await startRecording();
-        } else if (learningState === 'recording') {
-            // Stop recording
-            await stopRecording();
-        }
+        if (learningState === 'listen') await startRecording();
+        else if (learningState === 'recording') await stopRecording();
     };
 
     const startRecording = async () => {
         try {
             setLearningState('recording');
-            const { recording: newRecording } = await Audio.Recording.createAsync(
-                Audio.RecordingOptionsPresets.HIGH_QUALITY
-            );
-            setRecording(newRecording);
-        } catch (error) {
-            console.error('Failed to start recording:', error);
+            const { recording: rec } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+            setRecording(rec);
+        } catch (e) {
+            console.error('Recording error:', e);
             setLearningState('listen');
         }
     };
 
     const stopRecording = async () => {
         if (!recording) return;
-
         try {
             setLearningState('analyzing');
             await recording.stopAndUnloadAsync();
-            const uri = recording.getURI();
-
-            // For now, simulate pronunciation analysis
-            // TODO: Integrate ONNX Wav2Vec2 model here
-            await analyzePronunciation(uri);
-
             setRecording(null);
-        } catch (error) {
-            console.error('Failed to stop recording:', error);
+            await analyzePronunciation();
+        } catch (e) {
+            console.error('Stop recording error:', e);
             setLearningState('listen');
         }
     };
 
-    const analyzePronunciation = async (audioUri: string | null) => {
-        // Simulate processing time
-        await new Promise(resolve => setTimeout(resolve, 1500));
+    const analyzePronunciation = async () => {
+        if (!currentItem || !profile) return;
+        await delay(1200);
 
-        // For now, generate random accuracy (will be replaced with actual ONNX model)
-        const simulatedAccuracy = Math.random() * 100;
-        const isSuccess = simulatedAccuracy >= 85;
-        const isPartial = simulatedAccuracy >= 60 && simulatedAccuracy < 85;
+        // Simulated accuracy — in production, replace with real speech recognition
+        const base = 60 + Math.random() * 40;
+        const attempt = attemptCount + 1;
+        setAttemptCount(attempt);
+
+        const simulatedAccuracy = Math.min(100, base + (attempt > 1 ? 5 : 0));
+        const earnedStars = computeStars(simulatedAccuracy);
 
         setAccuracy(simulatedAccuracy);
-        setIsCorrect(isSuccess);
+        setStars(earnedStars);
         setLearningState('feedback');
 
-        // Show appropriate feedback
-        if (isSuccess) {
+        // Record to problem tracker
+        await problemTracker.recordPhonemeAttempt(profile.id, currentItem.targetPhonemes, simulatedAccuracy);
+
+        // Record to progress tracker
+        await progressTracker.recordItemAttempt(profile.id, currentItem.id, simulatedAccuracy, earnedStars);
+        await progressTracker.updateStageProgress(profile.id, currentItem.stage, currentItem.id, earnedStars);
+
+        if (earnedStars === 3) {
             setAnimationType('celebrating');
-            setFeedbackMessage('Amazing! Perfect pronunciation! 🎉');
-            await ttsService.celebrateSuccess({
-                onAnimationStart: (animation) => setLipSyncAnimation(animation),
-                onAnimationUpdate: (time) => setCurrentAnimationTime(time),
-                onAnimationEnd: () => {
-                    setLipSyncAnimation(null);
-                    setCurrentAnimationTime(0);
-                },
-            });
-            await progressTracker.recordAttempt(currentWord.id, simulatedAccuracy, true);
-        } else if (isPartial) {
+            setFeedbackMessage('Perfect! Amazing job! 🌟');
+            setShowConfetti(true);
+            await ttsService.speak('Wonderful! Perfect! You are amazing!', { rate: 0.8, pitch: 1.2, ...lipSyncCallbacks });
+        } else if (earnedStars === 2) {
+            setAnimationType('celebrating');
+            setFeedbackMessage('Great job! Almost perfect! ⭐⭐');
+            await ttsService.speak('Great job! Well done!', { rate: 0.8, ...lipSyncCallbacks });
+        } else if (earnedStars === 1) {
             setAnimationType('encouraging');
-            setFeedbackMessage('Good try! Let\'s practice more! 👍');
-            await ttsService.encourageRetry(undefined, {
-                onAnimationStart: (animation) => setLipSyncAnimation(animation),
-                onAnimationUpdate: (time) => setCurrentAnimationTime(time),
-                onAnimationEnd: () => {
-                    setLipSyncAnimation(null);
-                    setCurrentAnimationTime(0);
-                },
-            });
-            await progressTracker.recordAttempt(currentWord.id, simulatedAccuracy, false);
+            setFeedbackMessage('Good try! Keep practicing! 💪');
+            await ttsService.speak('Good try! Let\'s keep going!', { rate: 0.75, ...lipSyncCallbacks });
         } else {
             setAnimationType('encouraging');
-            setFeedbackMessage('Keep trying! You can do it! 💪');
-            await ttsService.encourageRetry('Try to say it slowly', {
-                onAnimationStart: (animation) => setLipSyncAnimation(animation),
-                onAnimationUpdate: (time) => setCurrentAnimationTime(time),
-                onAnimationEnd: () => {
-                    setLipSyncAnimation(null);
-                    setCurrentAnimationTime(0);
-                },
-            });
-            await progressTracker.recordAttempt(currentWord.id, simulatedAccuracy, false);
+            setFeedbackMessage('Let\'s try again! You can do it! 🎯');
+            await ttsService.speak('Let\'s try again. Listen carefully.', { rate: 0.7, ...lipSyncCallbacks });
         }
 
-        // Wait a bit before allowing next attempt
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        // Update session stats
+        const newSessionStars = sessionStars + earnedStars;
+        const newSessionItems = sessionItems + 1;
+        setSessionStars(newSessionStars);
+        setSessionItems(newSessionItems);
 
-        if (isSuccess) {
-            // Move to next word
-            handleNextWord();
-        } else {
-            // Try again with same word
+        if (!sessionBest || earnedStars > sessionBest.stars) {
+            setSessionBest({ text: currentItem.displayText, stars: earnedStars });
+        }
+
+        // Add stars to profile
+        await profileService.addStars(profile.id, earnedStars);
+
+        await delay(earnedStars >= 2 ? 3000 : 2500);
+
+        // If failed (0 stars) and < 3 attempts, retry
+        if (earnedStars === 0 && attempt < 3) {
             setLearningState('listen');
             setAnimationType('idle');
-            setIsCorrect(null);
             setAccuracy(0);
+            setStars(0);
             setFeedbackMessage('');
+            return;
+        }
+
+        // Check session summary
+        if (newSessionItems % SESSION_LENGTH === 0) {
+            setShowSummary(true);
+        } else {
+            advanceToNext();
         }
     };
 
-    const handleNextWord = () => {
-        const nextWord = getRandomWord();
-        setCurrentWord(nextWord);
-        setIsCorrect(null);
+    const advanceToNext = () => {
         setAccuracy(0);
+        setStars(0);
         setFeedbackMessage('');
+        setAnimationType('idle');
+        setShowConfetti(false);
+
+        if (currentIndex + 1 < items.length) {
+            setCurrentIndex(prev => prev + 1);
+        } else {
+            // Loop back with reshuffle
+            const reshuffled = [...items].sort(() => Math.random() - 0.5);
+            setItems(reshuffled);
+            setCurrentIndex(0);
+        }
+    };
+
+    const handleReplay = async () => {
+        if (!currentItem || learningState !== 'listen') return;
+        setAnimationType('speaking');
+        await ttsService.speak(currentItem.text, { rate: 0.6, ...lipSyncCallbacks });
+        setAnimationType('idle');
+    };
+
+    const handleHint = async () => {
+        if (!currentItem) return;
+        setShowHint(true);
+        setAnimationType('speaking');
+        await ttsService.speak(currentItem.hint, { rate: 0.65, ...lipSyncCallbacks });
         setAnimationType('idle');
     };
 
     const handleSkip = () => {
         ttsService.stop();
-        handleNextWord();
+        advanceToNext();
     };
 
+    const handleSummaryContinue = () => {
+        setShowSummary(false);
+        advanceToNext();
+    };
+
+    const handleSummaryBreak = () => {
+        setShowSummary(false);
+        // Save session
+        if (profile) {
+            progressTracker.saveSession({
+                date: new Date().toISOString(),
+                profileId: profile.id,
+                itemsAttempted: sessionItems,
+                starsEarned: sessionStars,
+                stage: profile.currentStage,
+                durationSeconds: Math.round((Date.now() - sessionStartTime.current) / 1000),
+            });
+        }
+    };
+
+    if (!profile || !currentItem) {
+        return (
+            <LinearGradient colors={['#667eea', '#764ba2']} style={styles.container}>
+                <View style={styles.loadingContainer}>
+                    <Text style={styles.loadingEmoji}>🌟</Text>
+                    <Text style={styles.loadingText}>Getting ready...</Text>
+                </View>
+            </LinearGradient>
+        );
+    }
+
+    const stageColor = profile.currentStage === 1 ? '#FF6B6B' :
+        profile.currentStage === 2 ? '#4ECDC4' :
+            profile.currentStage === 3 ? '#45B7D1' : '#96CEB4';
+
     return (
-        <View style={styles.container}>
+        <LinearGradient colors={['#667eea', '#764ba2']} style={styles.container} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
             <SafeAreaView style={styles.safeArea}>
-                {/* Header with skip button */}
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
-                        <Text style={styles.skipText}>Skip →</Text>
-                    </TouchableOpacity>
-                </View>
+                {/* Confetti */}
+                <ConfettiOverlay visible={showConfetti} onComplete={() => setShowConfetti(false)} />
 
-                {/* 3D Character (upper half) */}
+                {/* Session Summary */}
+                <SessionSummary
+                    visible={showSummary}
+                    starsEarned={sessionStars}
+                    itemsCompleted={sessionItems}
+                    bestItem={sessionBest}
+                    onContinue={handleSummaryContinue}
+                    onTakeBreak={handleSummaryBreak}
+                />
+
+                {/* Header */}
+                <Animated.View style={[styles.header, { opacity: headerFade }]}>
+                    {/* Stage badge */}
+                    <View style={[styles.stageBadge, { backgroundColor: stageColor }]}>
+                        <Text style={styles.stageBadgeText}>
+                            Stage {profile.currentStage} · {STAGE_NAMES[profile.currentStage]}
+                        </Text>
+                    </View>
+
+                    {/* Stats row */}
+                    <View style={styles.statsRow}>
+                        <View style={styles.statChip}>
+                            <Text style={styles.statChipText}>🔥 {profile.currentStreak}</Text>
+                        </View>
+                        <View style={styles.statChip}>
+                            <Text style={styles.statChipText}>⭐ {profile.totalStars}</Text>
+                        </View>
+                        <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
+                            <Text style={styles.skipText}>Skip →</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Progress bar */}
+                    <View style={styles.progressBarContainer}>
+                        <View style={[styles.progressBarFill, { width: `${((currentIndex + 1) / items.length) * 100}%` }]} />
+                    </View>
+                    <Text style={styles.progressText}>{currentIndex + 1} / {items.length}</Text>
+                </Animated.View>
+
+                {/* 3D Character */}
                 <View style={styles.characterContainer}>
-                    <Scene3D
-                        isAnimating={learningState === 'recording' || learningState === 'analyzing'}
-                        animationType={animationType}
-                        lipSyncAnimation={lipSyncAnimation}
-                        currentAnimationTime={currentAnimationTime}
-                    />
-                </View>
-
-                {/* Learning Object Display (middle) */}
-                <View style={styles.wordContainer}>
-                    <View style={styles.wordCard}>
-                        <Text style={styles.emoji}>{currentWord.emoji}</Text>
-                        <Text style={styles.word}>{currentWord.word}</Text>
-                        <Text style={styles.phonemes}>{currentWord.phonemes}</Text>
+                    <View style={styles.characterStage}>
+                        <Scene3D
+                            isAnimating={learningState === 'recording' || learningState === 'analyzing'}
+                            animationType={animationType}
+                            lipSyncAnimation={lipSyncAnimation}
+                            currentAnimationTime={currentAnimationTime}
+                        />
                     </View>
                 </View>
 
-                {/* Feedback Display */}
+                {/* Word / Sound Card */}
+                <Animated.View style={[styles.wordContainer, { opacity: cardOpacity, transform: [{ scale: cardScale }] }]}>
+                    <LinearGradient colors={['#ffffff', '#f0f0ff']} style={styles.wordCard} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                        {/* Type badge */}
+                        <View style={styles.typeBadge}>
+                            <Text style={styles.typeBadgeText}>
+                                {currentItem.type === 'sound' ? '🔊 Sound' : currentItem.type === 'syllable' ? '🎵 Syllable' : '📖 Word'}
+                            </Text>
+                        </View>
+
+                        <Text style={styles.emoji}>{currentItem.emoji}</Text>
+                        <Text style={styles.word}>{currentItem.displayText}</Text>
+                        <View style={styles.phonemesContainer}>
+                            <Text style={styles.phonemes}>{currentItem.phonemes}</Text>
+                        </View>
+
+                        {/* Hint */}
+                        {showHint && (
+                            <View style={styles.hintBox}>
+                                <Text style={styles.hintText}>💡 {currentItem.hint}</Text>
+                            </View>
+                        )}
+
+                        {/* Fun fact */}
+                        {currentItem.funFact && learningState === 'feedback' && stars >= 2 && (
+                            <View style={styles.funFactBox}>
+                                <Text style={styles.funFactText}>🌟 {currentItem.funFact}</Text>
+                            </View>
+                        )}
+                    </LinearGradient>
+                </Animated.View>
+
+                {/* Feedback */}
                 {learningState === 'feedback' && (
                     <View style={styles.feedbackContainer}>
+                        <StarRating stars={stars} size="large" animate />
                         <FeedbackDisplay
-                            isCorrect={isCorrect}
+                            isCorrect={stars >= 2}
                             accuracy={accuracy}
                             message={feedbackMessage}
                             visible={learningState === 'feedback'}
@@ -251,98 +431,192 @@ export default function LearnScreen() {
                     </View>
                 )}
 
-                {/* Record Button (bottom) */}
-                <View style={styles.buttonContainer}>
-                    <RecordButton
-                        onPress={handleRecordPress}
-                        isRecording={learningState === 'recording'}
-                        isProcessing={learningState === 'analyzing'}
-                        disabled={learningState !== 'listen' && learningState !== 'recording'}
-                    />
+                {/* Attempt counter */}
+                {learningState === 'listen' && attemptCount > 0 && (
+                    <Text style={styles.attemptText}>Attempt {attemptCount + 1} of 3</Text>
+                )}
+
+                {/* Bottom controls */}
+                <View style={styles.bottomControls}>
+                    {/* Hint & Replay buttons */}
+                    {(learningState === 'listen' || learningState === 'prompt') && (
+                        <View style={styles.helperButtons}>
+                            <TouchableOpacity style={styles.helperBtn} onPress={handleReplay}>
+                                <Text style={styles.helperBtnEmoji}>🔁</Text>
+                                <Text style={styles.helperBtnText}>Replay</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.helperBtn} onPress={handleHint}>
+                                <Text style={styles.helperBtnEmoji}>💡</Text>
+                                <Text style={styles.helperBtnText}>Hint</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+
+                    {/* Record button */}
+                    <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+                        <RecordButton
+                            onPress={handleRecordPress}
+                            isRecording={learningState === 'recording'}
+                            isProcessing={learningState === 'analyzing'}
+                            disabled={learningState !== 'listen' && learningState !== 'recording'}
+                        />
+                    </Animated.View>
 
                     {learningState === 'listen' && (
                         <Text style={styles.instruction}>
-                            Tap the button and say "{currentWord.word}"
+                            Tap and say "{currentItem.displayText}"
                         </Text>
+                    )}
+                    {learningState === 'introduce' && (
+                        <Text style={styles.instruction}>🎧 Listen carefully...</Text>
+                    )}
+                    {learningState === 'prompt' && (
+                        <Text style={styles.instruction}>Get ready to speak! 🎤</Text>
+                    )}
+                    {learningState === 'analyzing' && (
+                        <Text style={styles.instruction}>✨ Checking your pronunciation...</Text>
                     )}
                 </View>
             </SafeAreaView>
-        </View>
+        </LinearGradient>
     );
 }
 
-const { height } = Dimensions.get('window');
+function delay(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: ChildTheme.colors.backgroundStart,
+    container: { flex: 1 },
+    safeArea: { flex: 1 },
+    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
+    loadingEmoji: { fontSize: 64 },
+    loadingText: { fontSize: 24, fontWeight: '700', color: '#fff' },
+
+    // Header
+    header: { paddingHorizontal: 16, paddingTop: 8, gap: 8 },
+    stageBadge: {
+        alignSelf: 'flex-start',
+        paddingHorizontal: 14,
+        paddingVertical: 6,
+        borderRadius: 20,
     },
-    safeArea: {
-        flex: 1,
+    stageBadgeText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+    statsRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    statChip: {
+        backgroundColor: 'rgba(255,255,255,0.25)',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 16,
     },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'flex-end',
-        padding: ChildTheme.spacing.md,
-    },
+    statChipText: { color: '#fff', fontWeight: '800', fontSize: 14 },
     skipButton: {
-        backgroundColor: 'rgba(255, 255, 255, 0.3)',
-        paddingHorizontal: ChildTheme.spacing.lg,
-        paddingVertical: ChildTheme.spacing.sm,
-        borderRadius: ChildTheme.borderRadius.lg,
+        marginLeft: 'auto',
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        paddingHorizontal: 16,
+        paddingVertical: 6,
+        borderRadius: 16,
     },
-    skipText: {
-        color: ChildTheme.colors.textLight,
-        fontSize: ChildTheme.fontSize.md,
-        fontWeight: 'bold',
+    skipText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+    progressBarContainer: {
+        height: 6,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        borderRadius: 3,
+        overflow: 'hidden',
     },
-    characterContainer: {
-        height: height * 0.35,
-        marginBottom: ChildTheme.spacing.md,
+    progressBarFill: {
+        height: '100%',
+        backgroundColor: '#FFE066',
+        borderRadius: 3,
     },
-    wordContainer: {
-        alignItems: 'center',
-        marginBottom: ChildTheme.spacing.lg,
-    },
-    wordCard: {
-        backgroundColor: ChildTheme.colors.cardBackground,
-        padding: ChildTheme.spacing.xl,
-        borderRadius: ChildTheme.borderRadius.xl,
-        alignItems: 'center',
-        ...ChildTheme.shadows.large,
-        minWidth: 200,
-    },
-    emoji: {
-        fontSize: 80,
-        marginBottom: ChildTheme.spacing.sm,
-    },
-    word: {
-        fontSize: ChildTheme.fontSize.huge,
-        fontWeight: 'bold',
-        color: ChildTheme.colors.textPrimary,
-        marginBottom: ChildTheme.spacing.xs,
-    },
-    phonemes: {
-        fontSize: ChildTheme.fontSize.lg,
-        color: ChildTheme.colors.textSecondary,
-        fontStyle: 'italic',
-    },
-    feedbackContainer: {
-        marginBottom: ChildTheme.spacing.lg,
-    },
-    buttonContainer: {
+    progressText: { fontSize: 11, color: 'rgba(255,255,255,0.7)', textAlign: 'right' },
+
+    // Character
+    characterContainer: { height: height * 0.28, marginBottom: 8, paddingHorizontal: 16 },
+    characterStage: {
         flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingBottom: ChildTheme.spacing.xxl,
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        borderRadius: 20,
+        overflow: 'hidden',
     },
+
+    // Word card
+    wordContainer: { alignItems: 'center', marginBottom: 8, paddingHorizontal: 20 },
+    wordCard: {
+        paddingHorizontal: 28,
+        paddingVertical: 20,
+        borderRadius: 24,
+        alignItems: 'center',
+        width: '100%',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.2,
+        shadowRadius: 16,
+        elevation: 10,
+        borderWidth: 2,
+        borderColor: 'rgba(255,255,255,0.6)',
+        gap: 6,
+    },
+    typeBadge: {
+        backgroundColor: 'rgba(139,92,246,0.12)',
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: 12,
+    },
+    typeBadgeText: { fontSize: 12, color: '#6D28D9', fontWeight: '700' },
+    emoji: { fontSize: 64 },
+    word: { fontSize: 42, fontWeight: '900', color: '#5B21B6', letterSpacing: 1 },
+    phonemesContainer: {
+        backgroundColor: 'rgba(139,92,246,0.12)',
+        paddingHorizontal: 14,
+        paddingVertical: 6,
+        borderRadius: 12,
+    },
+    phonemes: { fontSize: 16, color: '#6D28D9', fontWeight: '600', fontStyle: 'italic' },
+    hintBox: {
+        backgroundColor: 'rgba(255,200,0,0.15)',
+        borderRadius: 12,
+        padding: 10,
+        width: '100%',
+        borderWidth: 1,
+        borderColor: 'rgba(255,200,0,0.3)',
+    },
+    hintText: { fontSize: 13, color: '#92400E', fontWeight: '600', textAlign: 'center' },
+    funFactBox: {
+        backgroundColor: 'rgba(16,185,129,0.12)',
+        borderRadius: 12,
+        padding: 10,
+        width: '100%',
+        borderWidth: 1,
+        borderColor: 'rgba(16,185,129,0.3)',
+    },
+    funFactText: { fontSize: 13, color: '#065F46', fontWeight: '600', textAlign: 'center' },
+
+    // Feedback
+    feedbackContainer: { alignItems: 'center', marginBottom: 4, gap: 8 },
+    attemptText: { textAlign: 'center', color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600' },
+
+    // Bottom
+    bottomControls: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 16, gap: 12 },
+    helperButtons: { flexDirection: 'row', gap: 16 },
+    helperBtn: {
+        alignItems: 'center',
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        borderRadius: 16,
+        gap: 2,
+    },
+    helperBtnEmoji: { fontSize: 24 },
+    helperBtnText: { fontSize: 12, color: '#fff', fontWeight: '700' },
     instruction: {
-        marginTop: ChildTheme.spacing.md,
-        fontSize: ChildTheme.fontSize.lg,
-        color: ChildTheme.colors.textLight,
+        fontSize: 17,
+        color: '#fff',
         textAlign: 'center',
-        fontWeight: '600',
-        paddingHorizontal: ChildTheme.spacing.lg,
+        fontWeight: '700',
+        paddingHorizontal: 24,
+        textShadowColor: 'rgba(0,0,0,0.3)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 4,
     },
 });

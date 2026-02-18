@@ -22,46 +22,73 @@ export function Character3D({
     const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
     const [modelLoaded, setModelLoaded] = useState(false);
 
+    // Refs to hold latest prop values so the render loop (closure) always reads current values
+    const animationTypeRef = useRef(animationType);
+    const lipSyncAnimationRef = useRef(lipSyncAnimation);
+    const currentAnimationTimeRef = useRef(currentAnimationTime);
+
+    // Keep refs in sync with props on every render
+    useEffect(() => { animationTypeRef.current = animationType; }, [animationType]);
+    useEffect(() => { lipSyncAnimationRef.current = lipSyncAnimation; }, [lipSyncAnimation]);
+    useEffect(() => { currentAnimationTimeRef.current = currentAnimationTime; }, [currentAnimationTime]);
+
     const onContextCreate = async (gl: any) => {
-        // Create renderer
-        const renderer = new Renderer({ gl });
+        // Create renderer with antialiasing for smoother edges
+        const renderer = new Renderer({ gl, antialias: true });
         renderer.setSize(gl.drawingBufferWidth, gl.drawingBufferHeight);
+        renderer.setClearColor(0x000000, 0); // Transparent background
+
+        // Enhanced rendering quality
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
 
         // Create scene
         const scene = new THREE.Scene();
-        scene.background = null; // Transparent background
+        scene.background = null;
 
-        // Create camera
+        // Create camera with better framing
         const camera = new THREE.PerspectiveCamera(
-            45,
+            50, // Wider field of view
             gl.drawingBufferWidth / gl.drawingBufferHeight,
             0.1,
             1000
         );
-        camera.position.set(0, 0.5, 2.5);
+        camera.position.set(0, 0.5, 5); // Further back for larger character
         camera.lookAt(0, 0.5, 0);
 
-        // Add lights for better visibility
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-        scene.add(ambientLight);
+        // PROFESSIONAL LIGHTING SETUP for vibrant, visible character
 
-        const directionalLight1 = new THREE.DirectionalLight(0xffffff, 1.0);
-        directionalLight1.position.set(2, 3, 3);
-        directionalLight1.castShadow = true;
-        scene.add(directionalLight1);
+        // Key Light - Main illumination from front-right
+        const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
+        keyLight.position.set(3, 4, 3);
+        keyLight.castShadow = true;
+        keyLight.shadow.mapSize.width = 2048;
+        keyLight.shadow.mapSize.height = 2048;
+        scene.add(keyLight);
 
-        const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.6);
-        directionalLight2.position.set(-2, 2, -2);
-        scene.add(directionalLight2);
+        // Fill Light - Soften shadows from left
+        const fillLight = new THREE.DirectionalLight(0xb8d4ff, 1.0);
+        fillLight.position.set(-3, 2, -2);
+        scene.add(fillLight);
 
-        const rimLight = new THREE.DirectionalLight(0xffffff, 0.4);
-        rimLight.position.set(0, 2, -3);
+        // Rim Light - Create depth and edge lighting from behind
+        const rimLight = new THREE.DirectionalLight(0xffd4a3, 1.5);
+        rimLight.position.set(0, 3, -4);
         scene.add(rimLight);
 
-        // Add a fill light from below
-        const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
-        fillLight.position.set(0, -1, 2);
-        scene.add(fillLight);
+        // Strong Ambient Light - Ensure nothing is too dark
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+        scene.add(ambientLight);
+
+        // Bottom Fill - Illuminate face from below
+        const bottomLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        bottomLight.position.set(0, -2, 2);
+        scene.add(bottomLight);
+
+        // Hemisphere Light - Natural sky/ground lighting
+        const hemiLight = new THREE.HemisphereLight(0xffeeb1, 0x080820, 0.6);
+        scene.add(hemiLight);
 
         // Load GLB model with facial rig
         let model: THREE.Group | null = null;
@@ -73,91 +100,144 @@ export function Character3D({
         }> = [];
 
         try {
-            // Load the new facial rig model
+            // ── Step 1: Pre-load the external texture FIRST ──────────────────
+            // This avoids the GLTFLoader blob creation issue on React Native
+            let characterTexture: THREE.Texture | null = null;
+            try {
+                const textureAsset = Asset.fromModule(require('../textures/gltf_embedded_0.png'));
+                await textureAsset.downloadAsync();
+                const textureUri = textureAsset.localUri || textureAsset.uri;
+
+                characterTexture = await new Promise<THREE.Texture>((resolve, reject) => {
+                    const textureLoader = new THREE.TextureLoader();
+                    textureLoader.load(
+                        textureUri,
+                        (texture: THREE.Texture) => {
+                            texture.flipY = false;
+                            texture.colorSpace = THREE.SRGBColorSpace;
+                            console.log('✅ Texture pre-loaded successfully');
+                            resolve(texture);
+                        },
+                        undefined,
+                        (err: any) => {
+                            console.warn('⚠️ Texture load failed, using fallback color:', err);
+                            reject(err);
+                        }
+                    );
+                });
+            } catch {
+                console.warn('⚠️ Texture unavailable, character will use solid color');
+            }
+
+            // ── Step 2: Load the GLB model ───────────────────────────────────
             const asset = Asset.fromModule(require('../source/facial_rig_test_.glb'));
             await asset.downloadAsync();
 
             const loader = new GLTFLoader();
+
+            // Patch the loader's manager to intercept blob:// URLs that RN can't handle.
+            // When the GLB has embedded textures, GLTFLoader tries to create a Blob URL.
+            // We intercept that and return our pre-loaded texture URI instead.
+            if (characterTexture) {
+                loader.manager.setURLModifier((url: string) => {
+                    // If it's a blob or data URL (embedded texture), redirect to our asset
+                    if (url.startsWith('blob:') || url.startsWith('data:image')) {
+                        console.log('🔄 Redirecting embedded texture to pre-loaded asset');
+                        const textureAsset = Asset.fromModule(require('../textures/gltf_embedded_0.png'));
+                        return textureAsset.localUri || textureAsset.uri || url;
+                    }
+                    return url;
+                });
+            }
+
             const gltf = await new Promise<any>((resolve, reject) => {
                 loader.load(
                     asset.localUri || asset.uri,
                     resolve,
                     undefined,
-                    reject
+                    (err: any) => {
+                        console.error('❌ GLB load error:', err);
+                        reject(err);
+                    }
                 );
             });
 
             model = gltf.scene;
+            console.log('✅ GLB model loaded');
 
-            // Ensure all materials are properly configured
+            // ── Step 3: Apply materials to all meshes ────────────────────────
             model.traverse((child: any) => {
-                if (child.isMesh) {
-                    // Enable proper material rendering
-                    if (child.material) {
-                        child.material.needsUpdate = true;
+                if (!child.isMesh) return;
 
-                        // Ensure materials are visible
-                        if (Array.isArray(child.material)) {
-                            child.material.forEach((mat: any) => {
-                                mat.needsUpdate = true;
-                                mat.side = THREE.FrontSide;
-                            });
-                        } else {
-                            child.material.side = THREE.FrontSide;
-                        }
+                const applyMaterial = (mat: any) => {
+                    // Apply our pre-loaded texture if the mesh has no map or has a broken one
+                    if (characterTexture && !mat.map) {
+                        mat.map = characterTexture;
+                        mat.color.setHex(0xffffff);
+                    } else if (!characterTexture) {
+                        // Fallback: warm skin tone
+                        mat.color.setHex(0xFFCBA4);
                     }
+                    mat.roughness = 0.8;
+                    mat.metalness = 0.1;
+                    mat.side = THREE.DoubleSide;
+                    mat.needsUpdate = true;
+                };
 
-                    // Enable shadows
-                    child.castShadow = true;
-                    child.receiveShadow = true;
+                if (Array.isArray(child.material)) {
+                    child.material.forEach(applyMaterial);
+                } else if (child.material) {
+                    applyMaterial(child.material);
+                } else {
+                    child.material = new THREE.MeshStandardMaterial({
+                        map: characterTexture ?? undefined,
+                        color: characterTexture ? 0xffffff : 0xFFCBA4,
+                        roughness: 0.8,
+                        metalness: 0.1,
+                        side: THREE.DoubleSide,
+                    });
                 }
-            });
 
-            model.scale.set(1.2, 1.2, 1.2);
-            model.position.set(0, -1, 0);
-            scene.add(model);
+                child.castShadow = true;
+                child.receiveShadow = true;
 
-            console.log('=== Facial Rig Loaded ===');
-
-            // Find facial meshes with blendshapes and bones
-            model.traverse((child: any) => {
-                const name = child.name.toLowerCase();
-
-                // Look for meshes with morph targets (blendshapes)
-                if (child.isMesh && child.morphTargetDictionary) {
-                    console.log(`Found facial mesh: ${child.name}`);
-                    console.log('Blendshapes:', Object.keys(child.morphTargetDictionary));
-
+                // Collect facial meshes with blendshapes
+                if (child.morphTargetDictionary) {
+                    console.log(`🎭 Facial mesh: ${child.name}`, Object.keys(child.morphTargetDictionary));
                     facialMeshes.push({
                         mesh: child,
                         morphTargetDictionary: child.morphTargetDictionary,
                     });
                 }
+            });
 
-                // Look for jaw bone
-                if (!jawBone && (
-                    name.includes('jaw') ||
-                    name.includes('chin') ||
-                    name.includes('mandible')
-                )) {
-                    console.log('Found jaw bone:', child.name);
+            // ── Step 4: Find bones ───────────────────────────────────────────
+            model.traverse((child: any) => {
+                const name = child.name.toLowerCase();
+                if (!jawBone && (name.includes('jaw') || name.includes('chin') || name.includes('mandible'))) {
+                    console.log('🦴 Jaw bone:', child.name);
                     jawBone = child;
                 }
-
-                // Look for head bone
-                if (!headBone && (
-                    name.includes('head') ||
-                    name.includes('skull')
-                )) {
-                    console.log('Found head bone:', child.name);
+                if (!headBone && (name.includes('head') || name.includes('skull'))) {
+                    console.log('🦴 Head bone:', child.name);
                     headBone = child;
                 }
             });
 
-            console.log(`Total facial meshes with blendshapes: ${facialMeshes.length}`);
+            model.scale.set(3.0, 3.0, 3.0);
+            model.position.set(0, -1.5, 0);
+            scene.add(model);
+
+            console.log(`✅ Character ready. Facial meshes: ${facialMeshes.length}`);
             setModelLoaded(true);
         } catch (error) {
-            console.error('Error loading facial rig:', error);
+            console.error('❌ Error loading character model:', error);
+            // Add a fallback sphere so the scene isn't empty
+            const fallbackGeo = new THREE.SphereGeometry(0.8, 32, 32);
+            const fallbackMat = new THREE.MeshStandardMaterial({ color: 0xFFCBA4, roughness: 0.8 });
+            const fallbackMesh = new THREE.Mesh(fallbackGeo, fallbackMat);
+            fallbackMesh.position.set(0, 0, 0);
+            scene.add(fallbackMesh);
         }
 
         // Animation variables
@@ -166,16 +246,21 @@ export function Character3D({
         let jumpStartTime = 0;
         let idleTime = 0;
 
-        // Store initial positions for body stillness
+        // Store initial positions
         const initialPosition = model ? model.position.clone() : new THREE.Vector3();
         const initialRotation = model ? model.rotation.clone() : new THREE.Euler();
 
-        // Helper function to apply blendshape weights
+        // Helper function to apply blendshape weights with smooth interpolation
         const applyBlendshapes = (weights: { [key: string]: number | undefined }) => {
-            for (const { mesh, morphTargetDictionary } of facialMeshes) {
-                if (!mesh.morphTargetInfluences) continue;
+            console.log('🎬 Applying blendshapes:', weights);
 
-                // Map our generic blendshape names to actual model blendshape names
+            for (const { mesh, morphTargetDictionary } of facialMeshes) {
+                if (!mesh.morphTargetInfluences) {
+                    console.log('⚠️ No morphTargetInfluences on mesh');
+                    continue;
+                }
+
+                // Map generic blendshape names to model-specific names
                 const blendshapeMapping: { [key: string]: string[] } = {
                     jawOpen: ['jawOpen', 'jaw_open', 'mouthOpen', 'mouth_open', 'JawOpen'],
                     mouthSmile: ['mouthSmile', 'mouth_smile', 'smile', 'Smile'],
@@ -185,15 +270,19 @@ export function Character3D({
                     mouthRollUpper: ['mouthRollUpper', 'mouth_roll_upper', 'upperLipRoll'],
                 };
 
+                // Apply each weight
                 for (const [genericName, value] of Object.entries(weights)) {
                     if (value === undefined) continue;
 
                     const possibleNames = blendshapeMapping[genericName] || [genericName];
-
                     for (const possibleName of possibleNames) {
                         if (possibleName in morphTargetDictionary) {
                             const index = morphTargetDictionary[possibleName];
-                            mesh.morphTargetInfluences[index] = value;
+                            // Smooth interpolation to new value
+                            const current = mesh.morphTargetInfluences[index];
+                            const lerp = current + (value - current) * 0.3;
+                            mesh.morphTargetInfluences[index] = lerp;
+                            console.log(`  ✅ ${possibleName} = ${lerp.toFixed(2)}`);
                             break;
                         }
                     }
@@ -201,45 +290,58 @@ export function Character3D({
             }
         };
 
-        // Render loop
+        // Render loop - 60 FPS for smooth animation
         const render = () => {
-            timeoutRef.current = setTimeout(render, 1000 / 30); // 30 FPS
-            time += 0.033; // ~30fps delta
-            idleTime += 0.033;
+            timeoutRef.current = setTimeout(render, 1000 / 60); // 60 FPS
+            time += 0.0167; // ~60fps delta
+            idleTime += 0.0167;
 
             if (model) {
-                // Reset to initial position (keep body still)
+                // Reset to initial position
                 model.position.copy(initialPosition);
                 model.rotation.copy(initialRotation);
 
-                // Idle animation - very gentle breathing
-                if (animationType === 'idle') {
-                    const breathe = Math.sin(idleTime * 0.8) * 0.02;
+                // Read current values from refs (avoids stale closure)
+                const currentAnimType = animationTypeRef.current;
+                const currentLipSync = lipSyncAnimationRef.current;
+                const currentAnimTime = currentAnimationTimeRef.current;
+
+                // Idle animation - gentle breathing and subtle head movement
+                if (currentAnimType === 'idle') {
+                    const breathe = Math.sin(idleTime * 0.8) * 0.025;
                     model.position.y = initialPosition.y + breathe;
+
+                    // Subtle head rotation
+                    const headSway = Math.sin(idleTime * 0.5) * 0.03;
+                    model.rotation.y = headSway;
                 }
 
-                // Speaking animation - lip-sync with blendshapes
-                if (animationType === 'speaking' && lipSyncAnimation) {
+                // Speaking animation - LIP SYNC with blendshapes
+                if (currentAnimType === 'speaking' && currentLipSync) {
                     // Gentle bobbing while speaking
-                    const speakBob = Math.sin(time * 2) * 0.03;
+                    const speakBob = Math.sin(time * 3) * 0.04;
                     model.position.y = initialPosition.y + speakBob;
+
+                    // Slight head movement while speaking
+                    const headMove = Math.sin(time * 2) * 0.02;
+                    model.rotation.y = headMove;
 
                     // Get blendshape weights for current time
                     const blendWeights = getBlendWeightsAtTime(
-                        lipSyncAnimation,
-                        currentAnimationTime
+                        currentLipSync,
+                        currentAnimTime
                     );
 
-                    // Apply blendshapes
+                    // Apply blendshapes for lip sync
                     applyBlendshapes(blendWeights);
 
                     // Animate jaw bone if available
                     if (jawBone && blendWeights.jawOpen !== undefined) {
-                        // Rotate jaw to open mouth
-                        jawBone.rotation.x = blendWeights.jawOpen * 0.3; // Radians
+                        const targetRotation = blendWeights.jawOpen * 0.35;
+                        jawBone.rotation.x += (targetRotation - jawBone.rotation.x) * 0.3;
                     }
-                } else {
-                    // Reset blendshapes to neutral when not speaking
+                } else if (currentAnimType !== 'celebrating') {
+                    // Reset blendshapes to neutral when not speaking (but not during celebration)
                     applyBlendshapes({
                         jawOpen: 0,
                         mouthSmile: 0,
@@ -250,33 +352,45 @@ export function Character3D({
                     });
 
                     if (jawBone) {
-                        jawBone.rotation.x = 0;
+                        jawBone.rotation.x += (0 - jawBone.rotation.x) * 0.3;
                     }
                 }
 
-                // Celebrating animation - jump
-                if (animationType === 'celebrating' && !isJumping) {
+                // Celebrating animation - exciting jump with smile
+                if (currentAnimType === 'celebrating' && !isJumping) {
                     isJumping = true;
                     jumpStartTime = time;
                 }
 
                 if (isJumping) {
                     const elapsed = time - jumpStartTime;
-                    const jumpDuration = 0.6;
+                    const jumpDuration = 0.8;
 
                     if (elapsed < jumpDuration) {
                         const progress = elapsed / jumpDuration;
-                        const jumpHeight = Math.sin(progress * Math.PI) * 0.5;
+                        const jumpHeight = Math.sin(progress * Math.PI) * 0.6;
                         model.position.y = initialPosition.y + jumpHeight;
+                        model.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
 
-                        // Add a smile during celebration
                         applyBlendshapes({
-                            mouthSmile: 0.8,
+                            mouthSmile: 0.9,
+                            jawOpen: 0.3,
                         });
                     } else {
                         isJumping = false;
                         model.position.y = initialPosition.y;
+                        model.rotation.z = 0;
                     }
+                }
+
+                // Encouraging animation - nod with gentle smile
+                if (currentAnimType === 'encouraging') {
+                    const nod = Math.sin(time * 4) * 0.08;
+                    model.rotation.x = nod;
+
+                    applyBlendshapes({
+                        mouthSmile: 0.4,
+                    });
                 }
             }
 

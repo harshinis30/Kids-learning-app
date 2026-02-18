@@ -1,55 +1,60 @@
-# Character Rendering Fixes
+# Character Rendering Fix Summary
 
-## Issues Fixed
+## ✅ What Was Fixed
 
-### 1. White Silhouette Problem
-**Cause**: Materials weren't being properly configured after model loading  
-**Fix**: Added material configuration to ensure proper rendering:
-- Set `material.needsUpdate = true`
-- Configure `material.side = THREE.FrontSide`
-- Enable shadow casting/receiving
+### 1. **Material Fallback System**
+- Automatically creates default skin-tone material for meshes without materials
+- Detects and fixes white materials (likely missing textures)
+- Brightens dark materials automatically
+- Applies proper material properties (roughness, metalness)
 
-### 2. Camera & Lighting
-**Improvements**:
-- Adjusted camera FOV to 45° (from 50°)
-- Repositioned camera closer: `(0, 0.5, 2.5)` instead of `(0, 1, 3)`
-- Increased ambient light intensity: 0.8 (from 0.6)
-- Increased directional light intensity: 1.0 (from 0.8)
-- Added fill light from below for better facial visibility
-- Enabled shadow casting on main light
-
-### 3. Model Positioning
-- Adjusted scale: 1.2 (from 1.5) for better framing
-- Lowered position: y = -1 (from -0.5) to center face in view
-
-## Expected Result
-
-The character should now render with:
-✅ Proper textures and colors (not white)
-✅ Good lighting on face
-✅ Centered in view
-✅ Visible details (eyes, nose, mouth, hair)
-
-## If Still White
-
-If the character still appears as a white silhouette, the issue may be:
-
-1. **Missing Textures in GLB**: The model file might not have embedded textures
-   - Solution: Re-export the model with embedded textures
-
-2. **Model Format Issue**: The GLB might be corrupted
-   - Solution: Try re-exporting from Blender/source software
-
-3. **Expo-GL Limitation**: Some material types aren't supported
-   - Solution: Use simpler materials (MeshStandardMaterial or MeshPhongMaterial)
-
-## Testing
-
-Run the app and check the console for:
+### 2. **Enhanced Debugging**
+Added comprehensive console logging:
 ```
-=== Facial Rig Loaded ===
-Found facial mesh: [mesh name]
-Blendshapes: [list of blendshapes]
+🎨 Processing materials...
+📦 Mesh found: [mesh name]
+  Material 0: MeshStandardMaterial
+    Color: rgb(255, 219, 172)
 ```
 
-This confirms the model loaded successfully.
+Warnings you might see:
+- `⚠️ No material` - Fixed with default skin tone
+- `⚠️ No color property` - Fixed with default color
+- `⚠️ Material too white` - Replaced with skin tone (#FFDBAC)
+- `⚠️ Material too dark` - Brightened automatically
+
+### 3. **Material Configuration**
+- DoubleSide rendering (shows both faces)
+- Smooth shading
+- Proper lighting response
+- Slight emissive glow
+
+## 🔍 Check the Console
+
+When you run the app, look for the material processing logs. They'll tell you exactly what's happening with your model.
+
+## 📝 Next Steps
+
+If the character still appears white/outline:
+
+### Option 1: Re-export the Model (Recommended)
+See `TROUBLESHOOTING.md` for detailed Blender export settings.
+**Key**: Enable "Images" option to embed textures!
+
+### Option 2: Use the Fallback
+The code now applies a default skin tone to white materials, so the character should at least be visible (even if not with original colors).
+
+### Option 3: Try a Different Model
+Use a model from Mixamo, Ready Player Me, or Sketchfab with embedded textures.
+
+## 🎯 Expected Result
+
+After this fix:
+- ✅ Character should be visible (not just outline)
+- ✅ Character should have color (peachy skin tone if textures missing)
+- ✅ Console shows material info
+- ✅ Lip-sync still works
+
+## 🐛 The `pixelStorei()` Warnings
+
+These are **harmless** WebGL compatibility warnings from expo-gl. They don't affect functionality and can be ignored.
