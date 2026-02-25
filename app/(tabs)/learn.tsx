@@ -10,6 +10,7 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { BossBattle } from '../../components/BossBattle';
 import { ConfettiOverlay } from '../../components/ConfettiOverlay';
 import { FeedbackDisplay } from '../../components/FeedbackDisplay';
 import { RecordButton } from '../../components/RecordButton';
@@ -17,7 +18,9 @@ import { Scene3D } from '../../components/Scene3D';
 import { SessionSummary } from '../../components/SessionSummary';
 import { StarRating } from '../../components/StarRating';
 import { CurriculumItem, STAGE_NAMES, getStageItems } from '../../data/curriculum';
+import { playSound } from '../../services/audioService';
 import { LipSyncAnimation } from '../../services/lipSyncService';
+import { triggerEmotion } from '../../services/petService';
 import { problemTracker } from '../../services/problemTracker';
 import { ChildProfile, profileService } from '../../services/profileService';
 import { progressTracker } from '../../services/progressTracker';
@@ -55,6 +58,12 @@ export default function LearnScreen() {
     const [sessionBest, setSessionBest] = useState<{ text: string; stars: number } | undefined>();
     const [showSummary, setShowSummary] = useState(false);
     const sessionStartTime = useRef(Date.now());
+
+    // Boss battle
+    const [showBoss, setShowBoss] = useState(false);
+    const [bossWord, setBossWord] = useState<CurriculumItem | null>(null);
+    const wordsCompletedInSession = useRef(0);
+    const BOSS_EVERY_N_WORDS = 4;
 
     // Lip-sync
     const [lipSyncAnimation, setLipSyncAnimation] = useState<LipSyncAnimation | null>(null);
@@ -209,6 +218,7 @@ export default function LearnScreen() {
             setAnimationType('celebrating');
             setFeedbackMessage('Perfect! Amazing job! 🌟');
             setShowConfetti(true);
+            playSound('VICTORY');
             await ttsService.speak('Wonderful! Perfect! You are amazing!', { rate: 0.8, pitch: 1.2, ...lipSyncCallbacks });
         } else if (earnedStars === 2) {
             setAnimationType('celebrating');
@@ -222,6 +232,10 @@ export default function LearnScreen() {
             setAnimationType('encouraging');
             setFeedbackMessage('Let\'s try again! You can do it! 🎯');
             await ttsService.speak('Let\'s try again. Listen carefully.', { rate: 0.7, ...lipSyncCallbacks });
+        }
+
+        if (earnedStars > 0 && earnedStars < 3) {
+            playSound('STARS');
         }
 
         // Update session stats
@@ -252,8 +266,18 @@ export default function LearnScreen() {
         // Check session summary
         if (newSessionItems % SESSION_LENGTH === 0) {
             setShowSummary(true);
+            playSound('VICTORY');
         } else {
-            advanceToNext();
+            // Count completed word, check boss trigger
+            wordsCompletedInSession.current += 1;
+            if (wordsCompletedInSession.current % BOSS_EVERY_N_WORDS === 0 && !showBoss) {
+                // Pick the hardest word in this stage as boss word
+                const hard = items.find(it => it.difficulty === 'hard') ?? items[items.length - 1];
+                setBossWord(hard);
+                setShowBoss(true);
+            } else {
+                advanceToNext();
+            }
         }
     };
 
@@ -334,6 +358,25 @@ export default function LearnScreen() {
             <SafeAreaView style={styles.safeArea}>
                 {/* Confetti */}
                 <ConfettiOverlay visible={showConfetti} onComplete={() => setShowConfetti(false)} />
+
+                {/* Boss Battle overlay */}
+                <BossBattle
+                    visible={showBoss}
+                    bossWord={bossWord}
+                    stage={profile.currentStage}
+                    profileId={profile.id}
+                    onAttempt={(_stars: number) => {
+                        // Boss uses its own recording button internally
+                    }}
+                    onComplete={async (result: 'victory' | 'escaped', bonusStars: number) => {
+                        setShowBoss(false);
+                        await profileService.addStars(profile.id, bonusStars);
+                        if (result === 'victory') {
+                            triggerEmotion('victory');
+                        }
+                        advanceToNext();
+                    }}
+                />
 
                 {/* Session Summary */}
                 <SessionSummary

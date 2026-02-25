@@ -1,6 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   RefreshControl,
@@ -11,7 +11,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { PetCompanion } from '../../components/PetCompanion';
 import { STAGE_DESCRIPTIONS, STAGE_NAMES } from '../../data/curriculum';
+import { PetEmotion, subscribeToEmotion, triggerEmotion } from '../../services/petService';
 import { ProblemArea, problemTracker } from '../../services/problemTracker';
 import { ChildProfile, profileService } from '../../services/profileService';
 import { progressTracker, SessionRecord } from '../../services/progressTracker';
@@ -33,8 +35,9 @@ export default function HomeScreen() {
   const [achievements, setAchievements] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [hasProfile, setHasProfile] = useState<boolean | null>(null);
+  const [petEmotion, setPetEmotion] = useState<PetEmotion>('idle');
 
-  const pulseAnim = new Animated.Value(1);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   const load = useCallback(async () => {
     const p = await profileService.getActiveProfile();
@@ -52,6 +55,14 @@ export default function HomeScreen() {
     setProblemAreas(problems);
     setRecentSessions(sessions);
     setAchievements(achs);
+
+    // Check if user has been away 1+ days → wave emotion
+    const lastPlayed = new Date(p.lastPlayedDate);
+    const now = new Date();
+    const diffMs = now.getTime() - lastPlayed.getTime();
+    if (diffMs > 86400000) {
+      triggerEmotion('wave');
+    }
   }, []);
 
   useEffect(() => {
@@ -63,6 +74,9 @@ export default function HomeScreen() {
         Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
       ])
     ).start();
+    // Subscribe to pet emotion events from other screens
+    const unsubscribe = subscribeToEmotion(setPetEmotion);
+    return unsubscribe;
   }, []);
 
   // Redirect to onboarding if no profile — must be in useEffect, not render
@@ -117,6 +131,13 @@ export default function HomeScreen() {
               <Text style={styles.parentBtnText}>👨‍👩‍👧</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Pet Companion */}
+          <PetCompanion
+            totalStars={profile.totalStars}
+            profileId={profile.id}
+            emotion={petEmotion}
+          />
 
           {/* Stats row */}
           <View style={styles.statsRow}>

@@ -1,10 +1,31 @@
-import { Asset } from 'expo-asset';
-import { GLView } from 'expo-gl';
-import { Renderer } from 'expo-three';
-import React, { useEffect, useRef, useState } from 'react';
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
-import { LipSyncAnimation, getBlendWeightsAtTime } from '../services/lipSyncService';
+/**
+ * Character3D.tsx — 2D Animated Character with Full Viseme Lip-Sync
+ *
+ * Renders a vivid, expressive character using only React Native Animated + Views.
+ * Supports 13 distinct mouth shapes matching each viseme from lipSyncService.
+ *
+ * Mouth shapes per viseme:
+ *   sil  → thin closed line
+ *   AA   → wide tall oval  (apple, father)
+ *   E    → wide flat smile (bed, said)
+ *   I    → narrow smile    (bee, see)
+ *   O    → round circle    (boat, show)
+ *   U    → small pucker    (boot, blue)
+ *   M    → pressed closed  (mom)
+ *   F    → lower lip rolled up (fun)
+ *   L    → slightly open   (love)
+ *   W    → small round     (wow)
+ *   TH   → slightly open + wide (think)
+ *   S    → tiny slit       (see)
+ *   R    → medium round    (red)
+ */
+import React, { useEffect, useRef } from 'react';
+import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import {
+    LipSyncAnimation,
+    VisemeType,
+    getBlendWeightsAtTime,
+} from '../services/lipSyncService';
 
 interface Character3DProps {
     isAnimating?: boolean;
@@ -13,406 +34,523 @@ interface Character3DProps {
     currentAnimationTime?: number;
 }
 
+// Per-viseme mouth geometry: [width, height, borderRadius, isSmile]
+// isSmile → use upward curve; false → use downward oval
+const VISEME_MOUTH: Record<VisemeType, {
+    w: number; h: number; r: number;
+    smile: boolean;   // widen mouth corners up
+    pucker: boolean;  // narrow & round
+    fTeeth: boolean;  // show "F" lower-lip contact
+}> = {
+    sil: { w: 22, h: 4, r: 2, smile: false, pucker: false, fTeeth: false },
+    AA: { w: 38, h: 26, r: 14, smile: false, pucker: false, fTeeth: false },
+    E: { w: 40, h: 14, r: 6, smile: true, pucker: false, fTeeth: false },
+    I: { w: 32, h: 8, r: 4, smile: true, pucker: false, fTeeth: false },
+    O: { w: 26, h: 28, r: 14, smile: false, pucker: false, fTeeth: false },
+    U: { w: 18, h: 20, r: 12, smile: false, pucker: true, fTeeth: false },
+    M: { w: 24, h: 3, r: 2, smile: false, pucker: true, fTeeth: false },
+    F: { w: 28, h: 10, r: 5, smile: false, pucker: false, fTeeth: true },
+    L: { w: 30, h: 14, r: 7, smile: false, pucker: false, fTeeth: false },
+    W: { w: 20, h: 20, r: 12, smile: false, pucker: true, fTeeth: false },
+    TH: { w: 34, h: 10, r: 5, smile: false, pucker: false, fTeeth: false },
+    S: { w: 28, h: 5, r: 3, smile: true, pucker: false, fTeeth: false },
+    R: { w: 24, h: 16, r: 10, smile: false, pucker: true, fTeeth: false },
+};
+
 export function Character3D({
-    isAnimating = false,
     animationType = 'idle',
     lipSyncAnimation = null,
     currentAnimationTime = 0,
 }: Character3DProps) {
-    const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
-    const [modelLoaded, setModelLoaded] = useState(false);
 
-    // Refs to hold latest prop values so the render loop (closure) always reads current values
-    const animationTypeRef = useRef(animationType);
-    const lipSyncAnimationRef = useRef(lipSyncAnimation);
-    const currentAnimationTimeRef = useRef(currentAnimationTime);
+    // ── Mouth animated values ─────────────────────────────────────────────────
+    const mouthW = useRef(new Animated.Value(22)).current;
+    const mouthH = useRef(new Animated.Value(4)).current;
+    const mouthR = useRef(new Animated.Value(2)).current;
+    const smileAmt = useRef(new Animated.Value(0)).current;  // 0–1 → corner lift
+    const puckerAmt = useRef(new Animated.Value(0)).current;  // 0–1 → narrow ring
+    const fTeethAmt = useRef(new Animated.Value(0)).current;  // 0–1 → lower-lip show
 
-    // Keep refs in sync with props on every render
-    useEffect(() => { animationTypeRef.current = animationType; }, [animationType]);
-    useEffect(() => { lipSyncAnimationRef.current = lipSyncAnimation; }, [lipSyncAnimation]);
-    useEffect(() => { currentAnimationTimeRef.current = currentAnimationTime; }, [currentAnimationTime]);
+    // ── Body animations ───────────────────────────────────────────────────────
+    const bodyBounce = useRef(new Animated.Value(0)).current;
+    const bodyRotate = useRef(new Animated.Value(0)).current;
+    const bodyScale = useRef(new Animated.Value(1)).current;
 
-    const onContextCreate = async (gl: any) => {
-        // Create renderer with antialiasing for smoother edges
-        const renderer = new Renderer({ gl, antialias: true });
-        renderer.setSize(gl.drawingBufferWidth, gl.drawingBufferHeight);
-        renderer.setClearColor(0x000000, 0); // Transparent background
+    // ── Face extras ───────────────────────────────────────────────────────────
+    const eyeBlink = useRef(new Animated.Value(1)).current;
+    const eyeSquint = useRef(new Animated.Value(1)).current; // 1=normal, 0=happy
+    const cheekGlow = useRef(new Animated.Value(0)).current;
+    const eyebrowY = useRef(new Animated.Value(0)).current;
+    const starOpacity = useRef(new Animated.Value(0)).current;
+    const starY = useRef(new Animated.Value(0)).current;
+    const starScale = useRef(new Animated.Value(0)).current;
 
-        // Enhanced rendering quality
-        renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.2;
-        renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // ── Live refs so closures always see latest props ─────────────────────────
+    const lipSyncRef = useRef(lipSyncAnimation);
+    const animTimeRef = useRef(currentAnimationTime);
+    const animTypeRef = useRef(animationType);
+    lipSyncRef.current = lipSyncAnimation;
+    animTimeRef.current = currentAnimationTime;
+    animTypeRef.current = animationType;
 
-        // Create scene
-        const scene = new THREE.Scene();
-        scene.background = null;
-
-        // Create camera with better framing
-        const camera = new THREE.PerspectiveCamera(
-            50, // Wider field of view
-            gl.drawingBufferWidth / gl.drawingBufferHeight,
-            0.1,
-            1000
-        );
-        camera.position.set(0, 0.5, 5); // Further back for larger character
-        camera.lookAt(0, 0.5, 0);
-
-        // PROFESSIONAL LIGHTING SETUP for vibrant, visible character
-
-        // Key Light - Main illumination from front-right
-        const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
-        keyLight.position.set(3, 4, 3);
-        keyLight.castShadow = true;
-        keyLight.shadow.mapSize.width = 2048;
-        keyLight.shadow.mapSize.height = 2048;
-        scene.add(keyLight);
-
-        // Fill Light - Soften shadows from left
-        const fillLight = new THREE.DirectionalLight(0xb8d4ff, 1.0);
-        fillLight.position.set(-3, 2, -2);
-        scene.add(fillLight);
-
-        // Rim Light - Create depth and edge lighting from behind
-        const rimLight = new THREE.DirectionalLight(0xffd4a3, 1.5);
-        rimLight.position.set(0, 3, -4);
-        scene.add(rimLight);
-
-        // Strong Ambient Light - Ensure nothing is too dark
-        const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
-        scene.add(ambientLight);
-
-        // Bottom Fill - Illuminate face from below
-        const bottomLight = new THREE.DirectionalLight(0xffffff, 0.7);
-        bottomLight.position.set(0, -2, 2);
-        scene.add(bottomLight);
-
-        // Hemisphere Light - Natural sky/ground lighting
-        const hemiLight = new THREE.HemisphereLight(0xffeeb1, 0x080820, 0.6);
-        scene.add(hemiLight);
-
-        // Load GLB model with facial rig
-        let model: THREE.Group | null = null;
-        let jawBone: THREE.Object3D | null = null;
-        let headBone: THREE.Object3D | null = null;
-        let facialMeshes: Array<{
-            mesh: THREE.Mesh;
-            morphTargetDictionary: { [key: string]: number };
-        }> = [];
-
-        try {
-            // ── Step 1: Pre-load the external texture FIRST ──────────────────
-            // This avoids the GLTFLoader blob creation issue on React Native
-            let characterTexture: THREE.Texture | null = null;
-            try {
-                const textureAsset = Asset.fromModule(require('../textures/gltf_embedded_0.png'));
-                await textureAsset.downloadAsync();
-                const textureUri = textureAsset.localUri || textureAsset.uri;
-
-                characterTexture = await new Promise<THREE.Texture>((resolve, reject) => {
-                    const textureLoader = new THREE.TextureLoader();
-                    textureLoader.load(
-                        textureUri,
-                        (texture: THREE.Texture) => {
-                            texture.flipY = false;
-                            texture.colorSpace = THREE.SRGBColorSpace;
-                            console.log('✅ Texture pre-loaded successfully');
-                            resolve(texture);
-                        },
-                        undefined,
-                        (err: any) => {
-                            console.warn('⚠️ Texture load failed, using fallback color:', err);
-                            reject(err);
-                        }
-                    );
-                });
-            } catch {
-                console.warn('⚠️ Texture unavailable, character will use solid color');
-            }
-
-            // ── Step 2: Load the GLB model ───────────────────────────────────
-            const asset = Asset.fromModule(require('../source/facial_rig_test_.glb'));
-            await asset.downloadAsync();
-
-            const loader = new GLTFLoader();
-
-            // Patch the loader's manager to intercept blob:// URLs that RN can't handle.
-            // When the GLB has embedded textures, GLTFLoader tries to create a Blob URL.
-            // We intercept that and return our pre-loaded texture URI instead.
-            if (characterTexture) {
-                loader.manager.setURLModifier((url: string) => {
-                    // If it's a blob or data URL (embedded texture), redirect to our asset
-                    if (url.startsWith('blob:') || url.startsWith('data:image')) {
-                        console.log('🔄 Redirecting embedded texture to pre-loaded asset');
-                        const textureAsset = Asset.fromModule(require('../textures/gltf_embedded_0.png'));
-                        return textureAsset.localUri || textureAsset.uri || url;
-                    }
-                    return url;
-                });
-            }
-
-            const gltf = await new Promise<any>((resolve, reject) => {
-                loader.load(
-                    asset.localUri || asset.uri,
-                    resolve,
-                    undefined,
-                    (err: any) => {
-                        console.error('❌ GLB load error:', err);
-                        reject(err);
-                    }
-                );
-            });
-
-            model = gltf.scene;
-            console.log('✅ GLB model loaded');
-
-            // ── Step 3: Apply materials to all meshes ────────────────────────
-            model.traverse((child: any) => {
-                if (!child.isMesh) return;
-
-                const applyMaterial = (mat: any) => {
-                    // Apply our pre-loaded texture if the mesh has no map or has a broken one
-                    if (characterTexture && !mat.map) {
-                        mat.map = characterTexture;
-                        mat.color.setHex(0xffffff);
-                    } else if (!characterTexture) {
-                        // Fallback: warm skin tone
-                        mat.color.setHex(0xFFCBA4);
-                    }
-                    mat.roughness = 0.8;
-                    mat.metalness = 0.1;
-                    mat.side = THREE.DoubleSide;
-                    mat.needsUpdate = true;
-                };
-
-                if (Array.isArray(child.material)) {
-                    child.material.forEach(applyMaterial);
-                } else if (child.material) {
-                    applyMaterial(child.material);
-                } else {
-                    child.material = new THREE.MeshStandardMaterial({
-                        map: characterTexture ?? undefined,
-                        color: characterTexture ? 0xffffff : 0xFFCBA4,
-                        roughness: 0.8,
-                        metalness: 0.1,
-                        side: THREE.DoubleSide,
-                    });
-                }
-
-                child.castShadow = true;
-                child.receiveShadow = true;
-
-                // Collect facial meshes with blendshapes
-                if (child.morphTargetDictionary) {
-                    console.log(`🎭 Facial mesh: ${child.name}`, Object.keys(child.morphTargetDictionary));
-                    facialMeshes.push({
-                        mesh: child,
-                        morphTargetDictionary: child.morphTargetDictionary,
-                    });
-                }
-            });
-
-            // ── Step 4: Find bones ───────────────────────────────────────────
-            model.traverse((child: any) => {
-                const name = child.name.toLowerCase();
-                if (!jawBone && (name.includes('jaw') || name.includes('chin') || name.includes('mandible'))) {
-                    console.log('🦴 Jaw bone:', child.name);
-                    jawBone = child;
-                }
-                if (!headBone && (name.includes('head') || name.includes('skull'))) {
-                    console.log('🦴 Head bone:', child.name);
-                    headBone = child;
-                }
-            });
-
-            model.scale.set(3.0, 3.0, 3.0);
-            model.position.set(0, -1.5, 0);
-            scene.add(model);
-
-            console.log(`✅ Character ready. Facial meshes: ${facialMeshes.length}`);
-            setModelLoaded(true);
-        } catch (error) {
-            console.error('❌ Error loading character model:', error);
-            // Add a fallback sphere so the scene isn't empty
-            const fallbackGeo = new THREE.SphereGeometry(0.8, 32, 32);
-            const fallbackMat = new THREE.MeshStandardMaterial({ color: 0xFFCBA4, roughness: 0.8 });
-            const fallbackMesh = new THREE.Mesh(fallbackGeo, fallbackMat);
-            fallbackMesh.position.set(0, 0, 0);
-            scene.add(fallbackMesh);
-        }
-
-        // Animation variables
-        let time = 0;
-        let isJumping = false;
-        let jumpStartTime = 0;
-        let idleTime = 0;
-
-        // Store initial positions
-        const initialPosition = model ? model.position.clone() : new THREE.Vector3();
-        const initialRotation = model ? model.rotation.clone() : new THREE.Euler();
-
-        // Helper function to apply blendshape weights with smooth interpolation
-        const applyBlendshapes = (weights: { [key: string]: number | undefined }) => {
-            console.log('🎬 Applying blendshapes:', weights);
-
-            for (const { mesh, morphTargetDictionary } of facialMeshes) {
-                if (!mesh.morphTargetInfluences) {
-                    console.log('⚠️ No morphTargetInfluences on mesh');
-                    continue;
-                }
-
-                // Map generic blendshape names to model-specific names
-                const blendshapeMapping: { [key: string]: string[] } = {
-                    jawOpen: ['jawOpen', 'jaw_open', 'mouthOpen', 'mouth_open', 'JawOpen'],
-                    mouthSmile: ['mouthSmile', 'mouth_smile', 'smile', 'Smile'],
-                    mouthFunnel: ['mouthFunnel', 'mouth_funnel', 'mouthO', 'mouth_o', 'O'],
-                    mouthPucker: ['mouthPucker', 'mouth_pucker', 'mouthU', 'mouth_u', 'U'],
-                    mouthRollLower: ['mouthRollLower', 'mouth_roll_lower', 'lowerLipRoll'],
-                    mouthRollUpper: ['mouthRollUpper', 'mouth_roll_upper', 'upperLipRoll'],
-                };
-
-                // Apply each weight
-                for (const [genericName, value] of Object.entries(weights)) {
-                    if (value === undefined) continue;
-
-                    const possibleNames = blendshapeMapping[genericName] || [genericName];
-                    for (const possibleName of possibleNames) {
-                        if (possibleName in morphTargetDictionary) {
-                            const index = morphTargetDictionary[possibleName];
-                            // Smooth interpolation to new value
-                            const current = mesh.morphTargetInfluences[index];
-                            const lerp = current + (value - current) * 0.3;
-                            mesh.morphTargetInfluences[index] = lerp;
-                            console.log(`  ✅ ${possibleName} = ${lerp.toFixed(2)}`);
-                            break;
-                        }
-                    }
-                }
-            }
-        };
-
-        // Render loop - 60 FPS for smooth animation
-        const render = () => {
-            timeoutRef.current = setTimeout(render, 1000 / 60); // 60 FPS
-            time += 0.0167; // ~60fps delta
-            idleTime += 0.0167;
-
-            if (model) {
-                // Reset to initial position
-                model.position.copy(initialPosition);
-                model.rotation.copy(initialRotation);
-
-                // Read current values from refs (avoids stale closure)
-                const currentAnimType = animationTypeRef.current;
-                const currentLipSync = lipSyncAnimationRef.current;
-                const currentAnimTime = currentAnimationTimeRef.current;
-
-                // Idle animation - gentle breathing and subtle head movement
-                if (currentAnimType === 'idle') {
-                    const breathe = Math.sin(idleTime * 0.8) * 0.025;
-                    model.position.y = initialPosition.y + breathe;
-
-                    // Subtle head rotation
-                    const headSway = Math.sin(idleTime * 0.5) * 0.03;
-                    model.rotation.y = headSway;
-                }
-
-                // Speaking animation - LIP SYNC with blendshapes
-                if (currentAnimType === 'speaking' && currentLipSync) {
-                    // Gentle bobbing while speaking
-                    const speakBob = Math.sin(time * 3) * 0.04;
-                    model.position.y = initialPosition.y + speakBob;
-
-                    // Slight head movement while speaking
-                    const headMove = Math.sin(time * 2) * 0.02;
-                    model.rotation.y = headMove;
-
-                    // Get blendshape weights for current time
-                    const blendWeights = getBlendWeightsAtTime(
-                        currentLipSync,
-                        currentAnimTime
-                    );
-
-                    // Apply blendshapes for lip sync
-                    applyBlendshapes(blendWeights);
-
-                    // Animate jaw bone if available
-                    if (jawBone && blendWeights.jawOpen !== undefined) {
-                        const targetRotation = blendWeights.jawOpen * 0.35;
-                        jawBone.rotation.x += (targetRotation - jawBone.rotation.x) * 0.3;
-                    }
-                } else if (currentAnimType !== 'celebrating') {
-                    // Reset blendshapes to neutral when not speaking (but not during celebration)
-                    applyBlendshapes({
-                        jawOpen: 0,
-                        mouthSmile: 0,
-                        mouthFunnel: 0,
-                        mouthPucker: 0,
-                        mouthRollLower: 0,
-                        mouthRollUpper: 0,
-                    });
-
-                    if (jawBone) {
-                        jawBone.rotation.x += (0 - jawBone.rotation.x) * 0.3;
-                    }
-                }
-
-                // Celebrating animation - exciting jump with smile
-                if (currentAnimType === 'celebrating' && !isJumping) {
-                    isJumping = true;
-                    jumpStartTime = time;
-                }
-
-                if (isJumping) {
-                    const elapsed = time - jumpStartTime;
-                    const jumpDuration = 0.8;
-
-                    if (elapsed < jumpDuration) {
-                        const progress = elapsed / jumpDuration;
-                        const jumpHeight = Math.sin(progress * Math.PI) * 0.6;
-                        model.position.y = initialPosition.y + jumpHeight;
-                        model.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
-
-                        applyBlendshapes({
-                            mouthSmile: 0.9,
-                            jawOpen: 0.3,
-                        });
-                    } else {
-                        isJumping = false;
-                        model.position.y = initialPosition.y;
-                        model.rotation.z = 0;
-                    }
-                }
-
-                // Encouraging animation - nod with gentle smile
-                if (currentAnimType === 'encouraging') {
-                    const nod = Math.sin(time * 4) * 0.08;
-                    model.rotation.x = nod;
-
-                    applyBlendshapes({
-                        mouthSmile: 0.4,
-                    });
-                }
-            }
-
-            renderer.render(scene, camera);
-            gl.endFrameEXP();
-        };
-
-        render();
+    // ── Helper: animate mouth to a target viseme shape ────────────────────────
+    const animateMouth = (v: VisemeType, durationMs = 80) => {
+        const target = VISEME_MOUTH[v];
+        const cfg = { duration: durationMs, useNativeDriver: false };
+        Animated.parallel([
+            Animated.timing(mouthW, { toValue: target.w, ...cfg }),
+            Animated.timing(mouthH, { toValue: target.h, ...cfg }),
+            Animated.timing(mouthR, { toValue: target.r, ...cfg }),
+            Animated.timing(smileAmt, { toValue: target.smile ? 1 : 0, ...cfg }),
+            Animated.timing(puckerAmt, { toValue: target.pucker ? 1 : 0, ...cfg }),
+            Animated.timing(fTeethAmt, { toValue: target.fTeeth ? 1 : 0, ...cfg }),
+        ]).start();
     };
 
+    // ── Resolve current viseme from blend weights (dominant wins) ─────────────
+    const resolveViseme = (): VisemeType => {
+        const ls = lipSyncRef.current;
+        const t = animTimeRef.current;
+        if (!ls) return 'sil';
+        const w = getBlendWeightsAtTime(ls, t);
+
+        // Score each viseme by euclidean-style distance to current weights
+        const keys: (keyof typeof w)[] = ['jawOpen', 'mouthSmile', 'mouthFunnel', 'mouthPucker'];
+        let best: VisemeType = 'sil';
+        let bestScore = Infinity;
+
+        (Object.keys(VISEME_MOUTH) as VisemeType[]).forEach(viseme => {
+            const vshape = VISEME_MOUTH[viseme];
+            // Quick proxy: jaw ~ h/30, smile ~ smile, funnel ~ pucker
+            const jaw = (w.jawOpen ?? 0);
+            const smile = (w.mouthSmile ?? 0);
+            const pucker = (w.mouthPucker ?? 0);
+            const funnel = (w.mouthFunnel ?? 0);
+
+            const dJaw = Math.abs(jaw - vshape.h / 30);
+            const dSmile = Math.abs(smile - (vshape.smile ? 0.8 : 0));
+            const dPucker = Math.abs(pucker - (vshape.pucker ? 0.7 : 0));
+            const dFunnel = Math.abs(funnel - (vshape.fTeeth ? 0 : 0));
+            const score = dJaw + dSmile + dPucker + dFunnel;
+            if (score < bestScore) { bestScore = score; best = viseme; }
+        });
+        return best;
+    };
+
+    // ── Blink loop ────────────────────────────────────────────────────────────
     useEffect(() => {
-        return () => {
-            if (timeoutRef.current) {
-                clearTimeout(timeoutRef.current);
-            }
+        let timeout: ReturnType<typeof setTimeout>;
+        const blink = () => {
+            Animated.sequence([
+                Animated.timing(eyeBlink, { toValue: 0, duration: 80, useNativeDriver: false }),
+                Animated.timing(eyeBlink, { toValue: 1, duration: 80, useNativeDriver: false }),
+            ]).start(() => {
+                timeout = setTimeout(blink, 2000 + Math.random() * 3000);
+            });
         };
+        timeout = setTimeout(blink, 1800);
+        return () => clearTimeout(timeout);
     }, []);
 
+    // ── Idle breathing ────────────────────────────────────────────────────────
+    useEffect(() => {
+        if (animationType !== 'idle') {
+            animateMouth('sil');
+            return;
+        }
+        const loop = Animated.loop(
+            Animated.sequence([
+                Animated.timing(bodyBounce, { toValue: -5, duration: 1800, useNativeDriver: true }),
+                Animated.timing(bodyBounce, { toValue: 0, duration: 1800, useNativeDriver: true }),
+            ])
+        );
+        loop.start();
+        animateMouth('sil');
+        return () => loop.stop();
+    }, [animationType]);
+
+    // ── Speaking — poll viseme at 20fps ───────────────────────────────────────
+    useEffect(() => {
+        if (animationType !== 'speaking') {
+            animateMouth('sil', 150);
+            return;
+        }
+
+        // Gentle speaking bob
+        const bobLoop = Animated.loop(
+            Animated.sequence([
+                Animated.timing(bodyBounce, { toValue: -3, duration: 250, useNativeDriver: true }),
+                Animated.timing(bodyBounce, { toValue: 0, duration: 250, useNativeDriver: true }),
+            ])
+        );
+        bobLoop.start();
+
+        let running = true;
+        const poll = setInterval(() => {
+            if (!running) return;
+            const ls = lipSyncRef.current;
+            if (ls) {
+                // Use actual viseme data
+                const viseme = resolveViseme();
+                animateMouth(viseme, 60);
+            } else {
+                // Generic oscillation when no lip-sync data yet
+                const phase = (Date.now() / 220) % (2 * Math.PI);
+                const v: VisemeType = phase < 1 ? 'AA' : phase < 2 ? 'M' : phase < 3 ? 'O' : 'sil';
+                animateMouth(v, 80);
+            }
+        }, 50); // 20fps mouth updates
+
+        return () => {
+            running = false;
+            clearInterval(poll);
+            bobLoop.stop();
+            animateMouth('sil', 200);
+        };
+    }, [animationType]);
+
+    // ── Celebrating ───────────────────────────────────────────────────────────
+    useEffect(() => {
+        if (animationType !== 'celebrating') return;
+
+        Animated.sequence([
+            Animated.parallel([
+                Animated.spring(bodyScale, { toValue: 1.2, friction: 4, tension: 200, useNativeDriver: true }),
+                Animated.timing(bodyBounce, { toValue: -44, duration: 280, useNativeDriver: true }),
+                Animated.timing(bodyRotate, { toValue: 1, duration: 420, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+            ]),
+            Animated.parallel([
+                Animated.spring(bodyScale, { toValue: 1, friction: 5, tension: 100, useNativeDriver: true }),
+                Animated.timing(bodyBounce, { toValue: 0, duration: 380, useNativeDriver: true }),
+                Animated.timing(bodyRotate, { toValue: 0, duration: 200, useNativeDriver: true }),
+            ]),
+        ]).start();
+
+        Animated.timing(eyeSquint, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+        Animated.timing(cheekGlow, { toValue: 1, duration: 300, useNativeDriver: false }).start();
+        Animated.timing(eyebrowY, { toValue: -6, duration: 200, useNativeDriver: false }).start();
+        animateMouth('E', 200); // Big smile "E" = wide happy mouth
+
+        // ✨ Stars burst
+        Animated.sequence([
+            Animated.parallel([
+                Animated.timing(starOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+                Animated.spring(starScale, { toValue: 1, friction: 5, tension: 100, useNativeDriver: true }),
+                Animated.timing(starY, { toValue: -36, duration: 600, useNativeDriver: true }),
+            ]),
+            Animated.timing(starOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
+        ]).start();
+
+        return () => {
+            Animated.timing(eyeSquint, { toValue: 1, duration: 300, useNativeDriver: false }).start();
+            Animated.timing(cheekGlow, { toValue: 0, duration: 300, useNativeDriver: false }).start();
+            Animated.timing(eyebrowY, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+            starOpacity.setValue(0);
+            starScale.setValue(0);
+            starY.setValue(0);
+        };
+    }, [animationType]);
+
+    // ── Encouraging ───────────────────────────────────────────────────────────
+    useEffect(() => {
+        if (animationType !== 'encouraging') return;
+        const nodLoop = Animated.loop(
+            Animated.sequence([
+                Animated.timing(bodyBounce, { toValue: -5, duration: 280, useNativeDriver: true }),
+                Animated.timing(bodyBounce, { toValue: 0, duration: 280, useNativeDriver: true }),
+            ]),
+            { iterations: 3 }
+        );
+        nodLoop.start();
+        Animated.timing(eyebrowY, { toValue: -4, duration: 180, useNativeDriver: false }).start();
+        animateMouth('L', 180);
+        return () => {
+            nodLoop.stop();
+            Animated.timing(eyebrowY, { toValue: 0, duration: 180, useNativeDriver: false }).start();
+        };
+    }, [animationType]);
+
+    // ── Derived animated styles ───────────────────────────────────────────────
+    const spin = bodyRotate.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '360deg'],
+    });
+    const eyeH = eyeBlink.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 18],
+    });
+    const eyeTopR = eyeSquint.interpolate({
+        inputRange: [0, 1],
+        outputRange: [2, 10],
+    });
+    const cheekBg = cheekGlow.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['rgba(255,130,130,0)', 'rgba(255,130,130,0.55)'],
+    });
+
+    // Smile: top of mouth curves up at corners when smileAmt > 0
+    const mouthTopR = smileAmt.interpolate({
+        inputRange: [0, 1],
+        outputRange: [2, 18],
+    });
+    const mouthBotR = mouthR; // bottom stays round
+
+    // Pucker: dark ring border to simulate rounded lips
+    const puckerBorder = puckerAmt.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 4],
+    });
+    const puckerColor = puckerAmt.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['transparent', '#A04040'],
+    });
+
+    // F-teeth: a thin white strip inside mouth
+    const fTeethH = fTeethAmt.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 5],
+    });
+
     return (
-        <GLView
-            style={{ flex: 1 }}
-            onContextCreate={onContextCreate}
-        />
+        <View style={styles.wrapper}>
+            {/* Floating stars (celebrations) */}
+            <Animated.Text style={[
+                styles.stars,
+                { opacity: starOpacity, transform: [{ scale: starScale }, { translateY: starY }] }
+            ]}>
+                ✨⭐🌟
+            </Animated.Text>
+
+            {/* ── Main body ─────────────────────────────────────── */}
+            <Animated.View style={[styles.body, {
+                transform: [
+                    { translateY: bodyBounce },
+                    { rotate: spin },
+                    { scale: bodyScale },
+                ]
+            }]}>
+
+                {/* ── Head ─────────────────────────────────────── */}
+                <View style={styles.head}>
+
+                    {/* Eyebrows */}
+                    <Animated.View style={[styles.eyebrowRow, { transform: [{ translateY: eyebrowY }] }]}>
+                        <View style={styles.eyebrow} />
+                        <View style={styles.eyebrow} />
+                    </Animated.View>
+
+                    {/* Eyes */}
+                    <View style={styles.eyeRow}>
+                        {[0, 1].map(i => (
+                            <View key={i} style={styles.eyeOuter}>
+                                <Animated.View style={[
+                                    styles.eyeInner,
+                                    { height: eyeH, borderTopLeftRadius: eyeTopR, borderTopRightRadius: eyeTopR }
+                                ]} />
+                            </View>
+                        ))}
+                    </View>
+
+                    {/* Cheeks */}
+                    <View style={styles.cheekRow}>
+                        <Animated.View style={[styles.cheek, { backgroundColor: cheekBg }]} />
+                        <Animated.View style={[styles.cheek, { backgroundColor: cheekBg }]} />
+                    </View>
+
+                    {/* ── MOUTH ──────────────────────────────────────
+                         Uses animated width/height/radius + border ring (pucker)
+                         and an inner strip (F-teeth) for maximum clarity.
+                    ─────────────────────────────────────────────── */}
+                    <View style={styles.mouthOuter}>
+                        <Animated.View style={[
+                            styles.mouthBase,
+                            {
+                                width: mouthW,
+                                height: mouthH,
+                                borderTopLeftRadius: mouthTopR,
+                                borderTopRightRadius: mouthTopR,
+                                borderBottomLeftRadius: mouthBotR,
+                                borderBottomRightRadius: mouthBotR,
+                                borderWidth: puckerBorder,
+                                borderColor: puckerColor,
+                            }
+                        ]}>
+                            {/* Upper lip highlight */}
+                            <View style={styles.upperLip} />
+                            {/* F / TH teeth strip */}
+                            <Animated.View style={[styles.teethStrip, { height: fTeethH }]} />
+                        </Animated.View>
+                    </View>
+                </View>
+
+                {/* Neck */}
+                <View style={styles.neck} />
+
+                {/* Torso */}
+                <View style={styles.torso}>
+                    <View style={[styles.arm, styles.armLeft]} />
+                    <View style={[styles.arm, styles.armRight]} />
+                    <Text style={styles.badge}>⭐</Text>
+                </View>
+
+                {/* Legs */}
+                <View style={styles.legRow}>
+                    <View style={[styles.leg, { transform: [{ rotate: '-2deg' }] }]} />
+                    <View style={[styles.leg, { transform: [{ rotate: '2deg' }] }]} />
+                </View>
+
+                {/* Feet */}
+                <View style={styles.footRow}>
+                    <View style={styles.foot} />
+                    <View style={styles.foot} />
+                </View>
+            </Animated.View>
+
+            {/* Ground shadow */}
+            <View style={styles.shadow} />
+        </View>
     );
 }
+
+// ── Palette ───────────────────────────────────────────────────────────────────
+const SKIN = '#FFDAB0';
+const HAIR = '#3B2A1A';
+const SHIRT = '#6C63FF';
+const PANTS = '#2A2A5A';
+const SHOE = '#222';
+const LIP_DARK = '#9B3A35';  // dark lip colour
+const LIP_TOP = 'rgba(255,180,170,0.5)'; // highlight
+
+const styles = StyleSheet.create({
+    wrapper: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+    stars: { position: 'absolute', top: '8%', fontSize: 28, zIndex: 10 },
+
+    body: { alignItems: 'center' },
+
+    // Head
+    head: {
+        width: 100,
+        height: 100,
+        borderRadius: 50,
+        backgroundColor: SKIN,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'visible',
+        borderTopWidth: 16,
+        borderTopColor: HAIR,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 8,
+        elevation: 8,
+    },
+
+    // Eyebrows
+    eyebrowRow: { flexDirection: 'row', gap: 22, marginBottom: 4, marginTop: -10 },
+    eyebrow: { width: 22, height: 5, borderRadius: 3, backgroundColor: HAIR },
+
+    // Eyes
+    eyeRow: { flexDirection: 'row', gap: 18, marginBottom: 2 },
+    eyeOuter: {
+        width: 22, height: 22, borderRadius: 11,
+        backgroundColor: '#fff',
+        alignItems: 'center', justifyContent: 'flex-end',
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    eyeInner: {
+        width: 14,
+        borderBottomLeftRadius: 8,
+        borderBottomRightRadius: 8,
+        backgroundColor: '#1a1a2e',
+    },
+
+    // Cheeks
+    cheekRow: {
+        position: 'absolute',
+        flexDirection: 'row',
+        gap: 64,
+        bottom: 22,
+    },
+    cheek: { width: 22, height: 13, borderRadius: 10 },
+
+    // Mouth area
+    mouthOuter: {
+        marginTop: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 30,
+    },
+    mouthBase: {
+        backgroundColor: LIP_DARK,
+        overflow: 'hidden',
+        alignItems: 'center',
+        minHeight: 3,
+        minWidth: 16,
+    },
+    upperLip: {
+        position: 'absolute',
+        top: 0,
+        width: '100%',
+        height: 4,
+        backgroundColor: LIP_TOP,
+        borderTopLeftRadius: 8,
+        borderTopRightRadius: 8,
+    },
+    teethStrip: {
+        position: 'absolute',
+        bottom: 0,
+        width: '85%',
+        backgroundColor: '#F8F4F0',
+        borderRadius: 2,
+    },
+
+    // Neck
+    neck: { width: 24, height: 12, backgroundColor: SKIN },
+
+    // Torso
+    torso: {
+        width: 80, height: 90,
+        borderRadius: 16,
+        backgroundColor: SHIRT,
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.2,
+        shadowRadius: 6,
+        elevation: 6,
+        zIndex: 2,
+    },
+    badge: { fontSize: 28 },
+    arm: {
+        position: 'absolute',
+        width: 20, height: 64,
+        borderRadius: 10,
+        backgroundColor: SHIRT,
+        top: 4,
+    },
+    armLeft: { left: -20, transform: [{ rotate: '8deg' }] },
+    armRight: { right: -20, transform: [{ rotate: '-8deg' }] },
+
+    // Legs
+    legRow: { flexDirection: 'row', gap: 8, marginTop: -4, zIndex: 1 },
+    leg: { width: 26, height: 56, borderRadius: 8, backgroundColor: PANTS },
+
+    // Feet
+    footRow: { flexDirection: 'row', gap: 10 },
+    foot: { width: 34, height: 16, borderRadius: 8, backgroundColor: SHOE },
+
+    // Shadow
+    shadow: {
+        marginTop: 4,
+        width: 80, height: 12,
+        borderRadius: 40,
+        backgroundColor: 'rgba(0,0,0,0.15)',
+    },
+});
