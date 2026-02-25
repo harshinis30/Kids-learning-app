@@ -53,6 +53,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="writing-stage1"
+        options={{
+          title: 'Write',
+          tabBarIcon: ({ focused }) => <TabIcon emoji="✏️" focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
         name="speak"
         options={{
           href: null, // Hide from tab bar (keep for routing)
