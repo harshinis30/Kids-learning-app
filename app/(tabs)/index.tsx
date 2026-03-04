@@ -137,6 +137,7 @@ export default function HomeScreen() {
             totalStars={profile.totalStars}
             profileId={profile.id}
             emotion={petEmotion}
+            size="hero"
           />
 
           {/* Stats row */}

@@ -26,7 +26,7 @@ interface PetCompanionProps {
     totalStars: number;
     profileId: string;
     emotion: PetEmotion;
-    size?: 'normal' | 'small';
+    size?: 'normal' | 'small' | 'hero' | 'learnColumn';
 }
 
 export function PetCompanion({ totalStars, profileId, emotion, size = 'normal' }: PetCompanionProps) {
@@ -81,8 +81,59 @@ export function PetCompanion({ totalStars, profileId, emotion, size = 'normal' }
                 petStage={petStage.stage}
                 emotion={emotion}
                 size={64}
-                autoRotate={true}
+                autoRotate={false}
             />
+        );
+    }
+
+    // ── Hero variant (Massive size for Home Screen) ───────────────────────────
+    if (size === 'hero') {
+        return (
+            <TouchableOpacity onPress={() => setShowModal(true)} activeOpacity={0.95} style={styles.heroContainer}>
+                <Animated.View style={[{ transform: [{ scale: cardScale }] }, styles.heroView]}>
+                    <Animated.View style={[styles.heroGlow, { opacity: glowOpacity }]} />
+                    <Pet3D
+                        petStage={petStage.stage}
+                        emotion={emotion}
+                        size={320} // Enormous size for home screen
+                        autoRotate={false}
+                    />
+                    <View style={styles.heroBadge}>
+                        <Text style={styles.heroName}>{petName}</Text>
+                        <Text style={styles.heroLevel}>Lv.{petStage.stage}</Text>
+                    </View>
+                </Animated.View>
+            </TouchableOpacity>
+        );
+    }
+
+    // ── LearnColumn variant (no box, just the gorgeous pet in the 3-col layout) ─
+    if (size === 'learnColumn') {
+        return (
+            <TouchableOpacity onPress={() => setShowModal(true)} activeOpacity={0.9} style={styles.learnColContainer}>
+                <Animated.View style={[styles.learnColView, { transform: [{ scale: cardScale }] }]}>
+                    {/* Outer soft aura */}
+                    <Animated.View style={[styles.learnColAuraOuter, { opacity: glowOpacity }]} />
+                    {/* Inner bright aura */}
+                    <Animated.View style={[styles.learnColAuraInner, { opacity: glowOpacity }]} />
+                    {/* Sparkle ring */}
+                    <Animated.View style={[styles.learnColSparkleRing, { opacity: glowOpacity }]} />
+
+                    {/* The pet character — facing forward */}
+                    <Pet3D
+                        petStage={petStage.stage}
+                        emotion={emotion}
+                        size={120}
+                        autoRotate={false}
+                    />
+
+                    {/* Floating name badge at bottom */}
+                    <View style={styles.learnColBadge}>
+                        <Text style={styles.learnColName}>{petName}</Text>
+                        <Text style={styles.learnColLv}>Lv.{petStage.stage}</Text>
+                    </View>
+                </Animated.View>
+            </TouchableOpacity>
         );
     }
 
@@ -105,7 +156,7 @@ export function PetCompanion({ totalStars, profileId, emotion, size = 'normal' }
                             petStage={petStage.stage}
                             emotion={emotion}
                             size={100}
-                            autoRotate={emotion === 'idle'}
+                            autoRotate={false}
                         />
 
                         {/* Info */}
@@ -226,6 +277,96 @@ const styles = StyleSheet.create({
         fontSize: 10,
         color: 'rgba(255,255,255,0.3)',
     },
+    // Hero Variant
+    heroContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 20,
+        marginVertical: 10,
+    },
+    heroView: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
+    },
+    heroGlow: {
+        position: 'absolute',
+        width: 300,
+        height: 300,
+        borderRadius: 150,
+        backgroundColor: 'rgba(255,224,102,0.15)',
+        top: 10,
+    },
+    heroBadge: {
+        position: 'absolute',
+        bottom: 10,
+        backgroundColor: 'rgba(26,26,46,0.85)',
+        paddingHorizontal: 20,
+        paddingVertical: 8,
+        borderRadius: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(255,224,102,0.5)',
+    },
+    heroName: { fontSize: 22, fontWeight: '900', color: '#FFE066' },
+    heroLevel: { fontSize: 14, fontWeight: '800', color: '#fff', opacity: 0.8 },
+
+    // LearnColumn Variant — no card box, just the pet floating freely
+    learnColContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    learnColView: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
+        width: 150,
+        height: 180,
+    },
+    learnColAuraOuter: {
+        position: 'absolute',
+        width: 160,
+        height: 160,
+        borderRadius: 80,
+        backgroundColor: 'rgba(255, 220, 100, 0.10)',
+        borderWidth: 1.5,
+        borderColor: 'rgba(255, 224, 102, 0.25)',
+    },
+    learnColAuraInner: {
+        position: 'absolute',
+        width: 130,
+        height: 130,
+        borderRadius: 65,
+        backgroundColor: 'rgba(255, 180, 240, 0.12)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 120, 220, 0.2)',
+    },
+    learnColSparkleRing: {
+        position: 'absolute',
+        width: 145,
+        height: 145,
+        borderRadius: 73,
+        borderWidth: 2,
+        borderColor: 'rgba(150, 220, 255, 0.25)',
+        borderStyle: 'dashed',
+    },
+    learnColBadge: {
+        position: 'absolute',
+        bottom: 0,
+        backgroundColor: 'rgba(26, 26, 46, 0.75)',
+        paddingHorizontal: 14,
+        paddingVertical: 5,
+        borderRadius: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 224, 102, 0.4)',
+    },
+    learnColName: { fontSize: 13, fontWeight: '900', color: '#FFE066' },
+    learnColLv: { fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.7)' },
     // Modal
     modalOverlay: {
         flex: 1,

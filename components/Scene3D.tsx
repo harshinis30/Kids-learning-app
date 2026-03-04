@@ -8,21 +8,27 @@ interface Scene3DProps {
     animationType?: 'idle' | 'speaking' | 'celebrating' | 'encouraging';
     lipSyncAnimation?: LipSyncAnimation | null;
     currentAnimationTime?: number;
+    width?: number;
+    height?: number;
 }
 
 export function Scene3D({
     isAnimating,
     animationType,
     lipSyncAnimation,
-    currentAnimationTime
+    currentAnimationTime,
+    width,
+    height,
 }: Scene3DProps) {
     return (
-        <View style={styles.container}>
+        <View style={[styles.container, width && height ? { width, height } : {}]}>
             <Character3D
                 isAnimating={isAnimating}
                 animationType={animationType}
                 lipSyncAnimation={lipSyncAnimation}
                 currentAnimationTime={currentAnimationTime}
+                width={width}
+                height={height}
             />
         </View>
     );

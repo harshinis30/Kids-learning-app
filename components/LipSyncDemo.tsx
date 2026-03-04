@@ -8,12 +8,11 @@
 import React, { useState } from 'react';
 import {
     SafeAreaView,
-    ScrollView,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
 import { LipSyncAnimation } from '../services/lipSyncService';
 import { ttsService } from '../services/textToSpeech';
@@ -71,13 +70,10 @@ export function LipSyncDemo() {
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
-                <Text style={styles.title}>Lip-Sync Animation Demo</Text>
-                <Text style={styles.subtitle}>
-                    Test the automatic lip-sync with different phrases
-                </Text>
+                <Text style={styles.title}>Pronunciation Test</Text>
             </View>
 
-            {/* 3D Character */}
+            {/* Character */}
             <View style={styles.characterContainer}>
                 <Scene3D
                     isAnimating={isSpeaking}
@@ -87,53 +83,29 @@ export function LipSyncDemo() {
                 />
             </View>
 
-            {/* Animation Info */}
-            <View style={styles.infoContainer}>
-                <Text style={styles.infoText}>
-                    Status: {isSpeaking ? 'Speaking' : 'Idle'}
+            <View style={styles.inputSection}>
+                <Text style={styles.instructionText}>
+                    Enter a word to see it pronounced:
                 </Text>
-                {lipSyncAnimation && (
-                    <Text style={styles.infoText}>
-                        Time: {currentAnimationTime.toFixed(2)}s / {lipSyncAnimation.duration.toFixed(2)}s
+
+                <TextInput
+                    style={styles.textInput}
+                    value={customText}
+                    onChangeText={setCustomText}
+                    placeholder="e.g. apple, elephant..."
+                    placeholderTextColor="#999"
+                />
+
+                <TouchableOpacity
+                    style={[styles.speakButton, isSpeaking && styles.stopButton]}
+                    onPress={() => customText && handleSpeak(customText)}
+                    disabled={!customText && !isSpeaking}
+                >
+                    <Text style={styles.speakButtonText}>
+                        {isSpeaking ? 'Stop' : 'Pronounce'}
                     </Text>
-                )}
+                </TouchableOpacity>
             </View>
-
-            {/* Test Phrases */}
-            <ScrollView style={styles.phrasesContainer}>
-                <Text style={styles.sectionTitle}>Test Phrases:</Text>
-                {TEST_PHRASES.map((phrase, index) => (
-                    <TouchableOpacity
-                        key={index}
-                        style={styles.phraseButton}
-                        onPress={() => handleSpeak(phrase)}
-                    >
-                        <Text style={styles.phraseText}>{phrase}</Text>
-                    </TouchableOpacity>
-                ))}
-
-                {/* Custom Text Input */}
-                <View style={styles.customInputContainer}>
-                    <Text style={styles.sectionTitle}>Custom Text:</Text>
-                    <TextInput
-                        style={styles.textInput}
-                        value={customText}
-                        onChangeText={setCustomText}
-                        placeholder="Enter custom text..."
-                        placeholderTextColor="#999"
-                        multiline
-                    />
-                    <TouchableOpacity
-                        style={[styles.phraseButton, styles.customButton]}
-                        onPress={() => customText && handleSpeak(customText)}
-                        disabled={!customText}
-                    >
-                        <Text style={styles.phraseText}>
-                            {isSpeaking ? 'Stop' : 'Speak Custom Text'}
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-            </ScrollView>
         </SafeAreaView>
     );
 }
@@ -146,67 +118,52 @@ const styles = StyleSheet.create({
     header: {
         padding: 20,
         backgroundColor: '#16213e',
+        alignItems: 'center',
     },
     title: {
         fontSize: 24,
         fontWeight: 'bold',
         color: '#fff',
-        marginBottom: 5,
-    },
-    subtitle: {
-        fontSize: 14,
-        color: '#aaa',
     },
     characterContainer: {
-        height: 300,
-        backgroundColor: '#0f3460',
-    },
-    infoContainer: {
-        padding: 15,
-        backgroundColor: '#16213e',
-        borderBottomWidth: 1,
-        borderBottomColor: '#0f3460',
-    },
-    infoText: {
-        fontSize: 14,
-        color: '#fff',
-        marginBottom: 5,
-    },
-    phrasesContainer: {
         flex: 1,
-        padding: 15,
-    },
-    sectionTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#fff',
-        marginBottom: 10,
-        marginTop: 10,
-    },
-    phraseButton: {
         backgroundColor: '#0f3460',
-        padding: 15,
-        borderRadius: 10,
-        marginBottom: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
-    phraseText: {
+    inputSection: {
+        padding: 25,
+        backgroundColor: '#16213e',
+        borderTopWidth: 1,
+        borderTopColor: '#2a2a4e',
+    },
+    instructionText: {
         color: '#fff',
         fontSize: 16,
+        marginBottom: 10,
         textAlign: 'center',
     },
-    customInputContainer: {
-        marginTop: 20,
-    },
     textInput: {
-        backgroundColor: '#16213e',
+        backgroundColor: '#0f3460',
         color: '#fff',
         padding: 15,
-        borderRadius: 10,
-        marginBottom: 10,
-        minHeight: 80,
-        textAlignVertical: 'top',
+        borderRadius: 12,
+        fontSize: 18,
+        marginBottom: 15,
+        textAlign: 'center',
     },
-    customButton: {
-        backgroundColor: '#e94560',
+    speakButton: {
+        backgroundColor: '#4ade80',
+        padding: 18,
+        borderRadius: 12,
+        alignItems: 'center',
+    },
+    stopButton: {
+        backgroundColor: '#f87171',
+    },
+    speakButtonText: {
+        color: '#1a1a2e',
+        fontSize: 18,
+        fontWeight: 'bold',
     },
 });

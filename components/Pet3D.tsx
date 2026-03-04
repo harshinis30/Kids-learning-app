@@ -171,7 +171,8 @@ export function Pet3D({ petStage, emotion, size = 88, autoRotate = false }: Prop
                 height={size}
                 autoRotate={autoRotate}
                 rotationSpeed={0.012}
-                cameraZ={2.5}
+                initialRotationY={-Math.PI / 2}
+                cameraZ={3.0}
                 lightIntensity={2.8}
                 backgroundColor="transparent"
             />

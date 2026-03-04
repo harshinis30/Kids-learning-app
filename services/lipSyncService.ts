@@ -126,13 +126,15 @@ const VISEME_BLENDSHAPES: Record<VisemeType, VisemeKeyframe['blendWeights']> = {
     },
 };
 
+import { RiTa } from 'rita';
+
 /**
- * Simple phoneme-to-viseme mapping
- * Maps common letter patterns to mouth shapes
+ * Phoneme-to-viseme mapping
+ * Maps ARPAbet phonemes (from RiTa) to mouth shapes
  */
 function textToVisemes(text: string): VisemeType[] {
     const visemes: VisemeType[] = [];
-    const words = text.toLowerCase().split(/\s+/);
+    const words = text.split(/\s+/);
 
     for (const word of words) {
         if (!word) continue;
@@ -142,88 +144,98 @@ function textToVisemes(text: string): VisemeType[] {
             visemes.push('sil');
         }
 
-        // Simple rule-based phoneme mapping
-        let i = 0;
-        while (i < word.length) {
-            const char = word[i];
-            const nextChar = word[i + 1];
-            const prevChar = i > 0 ? word[i - 1] : '';
+        // Remove punctuation
+        const cleanWord = word.replace(/[.,!?]/g, '');
+        if (!cleanWord) continue;
 
-            // Two-character patterns
-            if (char === 't' && nextChar === 'h') {
-                visemes.push('TH');
-                i += 2;
-                continue;
-            }
+        try {
+            // Get phonemes using RiTa (returns ARPAbet format like "ae p ah l")
+            const phonesStr = RiTa.phones(cleanWord);
+            if (phonesStr) {
+                const phones = phonesStr.split('-');
 
-            if (char === 'o' && nextChar === 'o') {
-                visemes.push('U');
-                i += 2;
-                continue;
-            }
+                for (const phone of phones) {
+                    const cleanPhone = phone.replace(/[0-9]/g, '').toLowerCase();
 
-            if (char === 'e' && nextChar === 'e') {
-                visemes.push('I');
-                i += 2;
-                continue;
-            }
+                    switch (cleanPhone) {
+                        // Vowels
+                        case 'aa':
+                        case 'ao':
+                        case 'ah':
+                            visemes.push('AA');
+                            break;
+                        case 'ae':
+                        case 'eh':
+                        case 'ay':
+                        case 'ey':
+                            visemes.push('E');
+                            break;
+                        case 'iy':
+                        case 'ih':
+                            visemes.push('I');
+                            break;
+                        case 'ow':
+                        case 'aw':
+                        case 'oy':
+                            visemes.push('O');
+                            break;
+                        case 'uw':
+                        case 'uh':
+                            visemes.push('U');
+                            break;
 
-            // Single character mapping
-            switch (char) {
-                case 'a':
-                    // "a" can be AA or E depending on context
-                    if (nextChar === 'y' || nextChar === 'i') {
-                        visemes.push('E');
-                    } else {
-                        visemes.push('AA');
+                        // Consonants
+                        case 'm':
+                        case 'b':
+                        case 'p':
+                            visemes.push('M');
+                            break;
+                        case 'f':
+                        case 'v':
+                            visemes.push('F');
+                            break;
+                        case 'l':
+                        case 'n':
+                        case 'ng':
+                        case 'd':
+                        case 't':
+                            visemes.push('L');
+                            break;
+                        case 'w':
+                        case 'r':
+                        case 'er':
+                        case 'y':
+                            visemes.push('W');
+                            break;
+                        case 'th':
+                        case 'dh':
+                            visemes.push('TH');
+                            break;
+                        case 's':
+                        case 'z':
+                        case 'sh':
+                        case 'zh':
+                        case 'ch':
+                        case 'jh':
+                            visemes.push('S');
+                            break;
+                        case 'k':
+                        case 'g':
+                        case 'hh':
+                            visemes.push('sil'); // Guttural, slight open
+                            break;
+                        default:
+                            visemes.push('sil');
                     }
-                    break;
-                case 'e':
-                    visemes.push('E');
-                    break;
-                case 'i':
-                    visemes.push('I');
-                    break;
-                case 'o':
-                    visemes.push('O');
-                    break;
-                case 'u':
-                    visemes.push('U');
-                    break;
-                case 'm':
-                case 'b':
-                case 'p':
-                    visemes.push('M');
-                    break;
-                case 'f':
-                case 'v':
-                    visemes.push('F');
-                    break;
-                case 'l':
-                    visemes.push('L');
-                    break;
-                case 'w':
-                    visemes.push('W');
-                    break;
-                case 's':
-                case 'z':
-                case 'c':
-                    visemes.push('S');
-                    break;
-                case 'r':
-                    visemes.push('R');
-                    break;
-                default:
-                    // Consonants that don't have specific mouth shapes
-                    // Use a neutral/slight open mouth
-                    if (prevChar && 'aeiou'.includes(prevChar)) {
-                        // Don't add extra viseme, extend previous vowel
-                    } else {
-                        visemes.push('sil');
-                    }
+                }
+            } else {
+                // Fallback for unknown words (basic guess)
+                visemes.push('AA');
+                visemes.push('M');
             }
-
-            i++;
+        } catch (e) {
+            console.warn('Phoneme error for word:', word, e);
+            visemes.push('sil');
         }
     }
 

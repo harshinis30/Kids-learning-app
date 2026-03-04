@@ -28,6 +28,7 @@ interface Props {
     initialAnimation?: string;
     autoRotate?: boolean;
     rotationSpeed?: number; // radians/frame
+    initialRotationY?: number; // radians — set facing direction after load
     cameraZ?: number;
     lightColor?: number;
     lightIntensity?: number;
@@ -43,6 +44,7 @@ const ModelViewer3D = forwardRef<ModelViewer3DRef, Props>(({
     initialAnimation,
     autoRotate = false,
     rotationSpeed = 0.008,
+    initialRotationY = 0,
     cameraZ = 3,
     lightColor = 0xffffff,
     lightIntensity = 2.5,
@@ -185,6 +187,8 @@ const ModelViewer3D = forwardRef<ModelViewer3DRef, Props>(({
 
                     scene.add(model);
                     modelRef.current = model;
+                    // Apply initial rotation so the model faces forward
+                    model.rotation.y = initialRotationY;
 
                     // Animations
                     if (gltf.animations.length > 0) {

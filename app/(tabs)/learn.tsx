@@ -13,14 +13,15 @@ import {
 import { BossBattle } from '../../components/BossBattle';
 import { ConfettiOverlay } from '../../components/ConfettiOverlay';
 import { FeedbackDisplay } from '../../components/FeedbackDisplay';
+import { PetCompanion } from '../../components/PetCompanion';
 import { RecordButton } from '../../components/RecordButton';
 import { Scene3D } from '../../components/Scene3D';
 import { SessionSummary } from '../../components/SessionSummary';
 import { StarRating } from '../../components/StarRating';
-import { CurriculumItem, STAGE_NAMES, getStageItems } from '../../data/curriculum';
+import { CurriculumItem, STAGE_NAMES, STAGE_REQUIRED_STARS, getStageItems } from '../../data/curriculum';
 import { playSound } from '../../services/audioService';
 import { LipSyncAnimation } from '../../services/lipSyncService';
-import { triggerEmotion } from '../../services/petService';
+import { PetEmotion, triggerEmotion } from '../../services/petService';
 import { problemTracker } from '../../services/problemTracker';
 import { ChildProfile, profileService } from '../../services/profileService';
 import { progressTracker } from '../../services/progressTracker';
@@ -29,6 +30,7 @@ import { ttsService } from '../../services/textToSpeech';
 type LearningState = 'loading' | 'introduce' | 'prompt' | 'listen' | 'recording' | 'analyzing' | 'feedback';
 
 const { width, height } = Dimensions.get('window');
+const COLUMN_W = Math.floor((width - 32) / 3); // 3 columns minus padding
 const SESSION_LENGTH = 5; // Show summary every 5 items
 
 function computeStars(accuracy: number): number {
@@ -58,6 +60,7 @@ export default function LearnScreen() {
     const [sessionBest, setSessionBest] = useState<{ text: string; stars: number } | undefined>();
     const [showSummary, setShowSummary] = useState(false);
     const sessionStartTime = useRef(Date.now());
+    const [petEmotion, setPetEmotion] = useState<PetEmotion>('idle');
 
     // Boss battle
     const [showBoss, setShowBoss] = useState(false);
@@ -216,20 +219,24 @@ export default function LearnScreen() {
 
         if (earnedStars === 3) {
             setAnimationType('celebrating');
+            setPetEmotion('victory');
             setFeedbackMessage('Perfect! Amazing job! 🌟');
             setShowConfetti(true);
             playSound('VICTORY');
             await ttsService.speak('Wonderful! Perfect! You are amazing!', { rate: 0.8, pitch: 1.2, ...lipSyncCallbacks });
         } else if (earnedStars === 2) {
             setAnimationType('celebrating');
+            setPetEmotion('happy');
             setFeedbackMessage('Great job! Almost perfect! ⭐⭐');
             await ttsService.speak('Great job! Well done!', { rate: 0.8, ...lipSyncCallbacks });
         } else if (earnedStars === 1) {
             setAnimationType('encouraging');
+            setPetEmotion('sad');
             setFeedbackMessage('Good try! Keep practicing! 💪');
             await ttsService.speak('Good try! Let\'s keep going!', { rate: 0.75, ...lipSyncCallbacks });
         } else {
             setAnimationType('encouraging');
+            setPetEmotion('sad');
             setFeedbackMessage('Let\'s try again! You can do it! 🎯');
             await ttsService.speak('Let\'s try again. Listen carefully.', { rate: 0.7, ...lipSyncCallbacks });
         }
@@ -248,8 +255,35 @@ export default function LearnScreen() {
             setSessionBest({ text: currentItem.displayText, stars: earnedStars });
         }
 
-        // Add stars to profile
+        // Add stars to profile and check for stage advancement
         await profileService.addStars(profile.id, earnedStars);
+
+        // ── Stage progression check ────────────────────────────────────────
+        const newTotalStars = profile.totalStars + earnedStars;
+        const requiredForNext = STAGE_REQUIRED_STARS[profile.currentStage];
+        if (
+            profile.currentStage < 4 &&
+            requiredForNext > 0 &&
+            newTotalStars >= requiredForNext
+        ) {
+            await profileService.advanceStage(profile.id);
+        }
+
+        // Re-read the updated profile so stage & stars display correctly
+        const updatedProfile = await profileService.getActiveProfile();
+        if (updatedProfile) {
+            setProfile(updatedProfile);
+            // If stage changed, reload the curriculum items for the new stage
+            if (updatedProfile.currentStage !== profile.currentStage) {
+                const newItems = getStageItems(
+                    updatedProfile.ageGroup,
+                    updatedProfile.currentStage as 1 | 2 | 3 | 4
+                );
+                const reshuffled = [...newItems].sort(() => Math.random() - 0.5);
+                setItems(reshuffled);
+                setCurrentIndex(0);
+            }
+        }
 
         await delay(earnedStars >= 2 ? 3000 : 2500);
 
@@ -286,6 +320,7 @@ export default function LearnScreen() {
         setStars(0);
         setFeedbackMessage('');
         setAnimationType('idle');
+        setPetEmotion('idle');
         setShowConfetti(false);
 
         if (currentIndex + 1 < items.length) {
@@ -417,49 +452,43 @@ export default function LearnScreen() {
                     <Text style={styles.progressText}>{currentIndex + 1} / {items.length}</Text>
                 </Animated.View>
 
-                {/* 3D Character */}
-                <View style={styles.characterContainer}>
-                    <View style={styles.characterStage}>
+                {/* 3-Column Split View */}
+                <View style={styles.columnsContainer}>
+
+                    {/* Column 1: The Word */}
+                    <View style={styles.column}>
+                        <Animated.View style={[styles.wordContainer, { opacity: cardOpacity, transform: [{ scale: cardScale }] }]}>
+                            <View style={styles.wordCard}>
+                                <Text style={styles.word}>{currentItem.displayText}</Text>
+                            </View>
+                        </Animated.View>
+                    </View>
+
+                    {/* Column 2: The Character (Teacher) */}
+                    <View style={styles.column}>
                         <Scene3D
                             isAnimating={learningState === 'recording' || learningState === 'analyzing'}
                             animationType={animationType}
                             lipSyncAnimation={lipSyncAnimation}
                             currentAnimationTime={currentAnimationTime}
+                            width={COLUMN_W}
+                            height={COLUMN_W * 2}
                         />
                     </View>
+
+                    {/* Column 3: The Pet Companion */}
+                    <View style={styles.column}>
+                        <View style={styles.petContainer}>
+                            <PetCompanion
+                                totalStars={profile.totalStars}
+                                profileId={profile.id}
+                                emotion={petEmotion}
+                                size="learnColumn"
+                            />
+                        </View>
+                    </View>
+
                 </View>
-
-                {/* Word / Sound Card */}
-                <Animated.View style={[styles.wordContainer, { opacity: cardOpacity, transform: [{ scale: cardScale }] }]}>
-                    <LinearGradient colors={['#ffffff', '#f0f0ff']} style={styles.wordCard} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-                        {/* Type badge */}
-                        <View style={styles.typeBadge}>
-                            <Text style={styles.typeBadgeText}>
-                                {currentItem.type === 'sound' ? '🔊 Sound' : currentItem.type === 'syllable' ? '🎵 Syllable' : '📖 Word'}
-                            </Text>
-                        </View>
-
-                        <Text style={styles.emoji}>{currentItem.emoji}</Text>
-                        <Text style={styles.word}>{currentItem.displayText}</Text>
-                        <View style={styles.phonemesContainer}>
-                            <Text style={styles.phonemes}>{currentItem.phonemes}</Text>
-                        </View>
-
-                        {/* Hint */}
-                        {showHint && (
-                            <View style={styles.hintBox}>
-                                <Text style={styles.hintText}>💡 {currentItem.hint}</Text>
-                            </View>
-                        )}
-
-                        {/* Fun fact */}
-                        {currentItem.funFact && learningState === 'feedback' && stars >= 2 && (
-                            <View style={styles.funFactBox}>
-                                <Text style={styles.funFactText}>🌟 {currentItem.funFact}</Text>
-                            </View>
-                        )}
-                    </LinearGradient>
-                </Animated.View>
 
                 {/* Feedback */}
                 {learningState === 'feedback' && (
@@ -574,66 +603,48 @@ const styles = StyleSheet.create({
     },
     progressText: { fontSize: 11, color: 'rgba(255,255,255,0.7)', textAlign: 'right' },
 
-    // Character
-    characterContainer: { height: height * 0.28, marginBottom: 8, paddingHorizontal: 16 },
-    characterStage: {
+    // Columns
+    columnsContainer: {
         flex: 1,
-        backgroundColor: 'rgba(255,255,255,0.12)',
-        borderRadius: 20,
-        overflow: 'hidden',
+        flexDirection: 'row',
+        paddingHorizontal: 8,
+        marginTop: 10,
+    },
+    column: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 8,
+    },
+
+    // Character container (no box — floats on gradient)
+    characterContainer: { width: '100%', height: '100%' },
+
+    // Pet
+    petContainer: {
+        width: '100%',
+        height: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
 
     // Word card
-    wordContainer: { alignItems: 'center', marginBottom: 8, paddingHorizontal: 20 },
+    wordContainer: { alignItems: 'center', width: '100%' },
     wordCard: {
-        paddingHorizontal: 28,
-        paddingVertical: 20,
+        paddingHorizontal: 16,
+        paddingVertical: 40,
         borderRadius: 24,
         alignItems: 'center',
+        justifyContent: 'center',
         width: '100%',
+        backgroundColor: '#ffffff',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.2,
         shadowRadius: 16,
         elevation: 10,
-        borderWidth: 2,
-        borderColor: 'rgba(255,255,255,0.6)',
-        gap: 6,
     },
-    typeBadge: {
-        backgroundColor: 'rgba(139,92,246,0.12)',
-        paddingHorizontal: 12,
-        paddingVertical: 4,
-        borderRadius: 12,
-    },
-    typeBadgeText: { fontSize: 12, color: '#6D28D9', fontWeight: '700' },
-    emoji: { fontSize: 64 },
-    word: { fontSize: 42, fontWeight: '900', color: '#5B21B6', letterSpacing: 1 },
-    phonemesContainer: {
-        backgroundColor: 'rgba(139,92,246,0.12)',
-        paddingHorizontal: 14,
-        paddingVertical: 6,
-        borderRadius: 12,
-    },
-    phonemes: { fontSize: 16, color: '#6D28D9', fontWeight: '600', fontStyle: 'italic' },
-    hintBox: {
-        backgroundColor: 'rgba(255,200,0,0.15)',
-        borderRadius: 12,
-        padding: 10,
-        width: '100%',
-        borderWidth: 1,
-        borderColor: 'rgba(255,200,0,0.3)',
-    },
-    hintText: { fontSize: 13, color: '#92400E', fontWeight: '600', textAlign: 'center' },
-    funFactBox: {
-        backgroundColor: 'rgba(16,185,129,0.12)',
-        borderRadius: 12,
-        padding: 10,
-        width: '100%',
-        borderWidth: 1,
-        borderColor: 'rgba(16,185,129,0.3)',
-    },
-    funFactText: { fontSize: 13, color: '#065F46', fontWeight: '600', textAlign: 'center' },
+    word: { fontSize: 36, fontWeight: '900', color: '#1a1a2e', letterSpacing: 1 },
 
     // Feedback
     feedbackContainer: { alignItems: 'center', marginBottom: 4, gap: 8 },
