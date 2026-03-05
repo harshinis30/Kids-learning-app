@@ -3,7 +3,7 @@ import { SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-na
 import AlphabetTracer from '../components/AlphabetTracer';
 import { practiceFlags } from './Stage3Recognition';
 
-const LETTERS = ['A', 'B', 'C', 'O'];
+const LETTERS = ['i', 't', 'u', 'w', 'e', 'l'];
 type SubPhase = '4A' | '4B' | '4C';
 const PHASES: SubPhase[] = ['4A', '4B', '4C'];
 
@@ -66,7 +66,7 @@ export default function Stage4AlphabetTrace() {
                 <View style={styles.completeContainer}>
                     <Text style={styles.completeEmoji}>🎊</Text>
                     <Text style={styles.completeTitle}>Stage 4 Complete!</Text>
-                    <Text style={styles.completeSubtitle}>Milo learned all the letters!</Text>
+                    <Text style={styles.completeSubtitle}>Milo mastered cursive handwriting! ✍️</Text>
 
                     <View style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: 16, borderRadius: 16, marginBottom: 16 }}>
                         <Text style={{ fontSize: 24, color: '#fff', fontWeight: 'bold' }}>
@@ -85,7 +85,8 @@ export default function Stage4AlphabetTrace() {
     return (
         <SafeAreaView style={styles.safe}>
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>Draw the Letter {currentLetter}</Text>
+                <Text style={styles.headerTitle}>Cursive:  {currentLetter}</Text>
+                <Text style={styles.cursiveBadge}>✍️ Cursive Handwriting</Text>
             </View>
 
             <AlphabetTracer
@@ -103,6 +104,17 @@ const styles = StyleSheet.create({
     safe: { flex: 1, backgroundColor: '#1a1a2e' },
     header: { padding: 12, alignItems: 'center', backgroundColor: 'rgba(26,26,46,0.95)', zIndex: 10, paddingTop: 40 },
     headerTitle: { fontSize: 24, fontWeight: '900', color: '#FFE066' },
+    cursiveBadge: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#FFE066',
+        backgroundColor: 'rgba(255,225,100,0.15)',
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: 12,
+        marginTop: 6,
+        overflow: 'hidden',
+    },
     completeContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 14, padding: 32 },
     completeEmoji: { fontSize: 80 },
     completeTitle: { fontSize: 36, fontWeight: '900', color: '#FFE066', textAlign: 'center' },

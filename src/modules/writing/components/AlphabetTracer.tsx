@@ -10,7 +10,14 @@ const LETTER_STROKES: Record<string, string[]> = {
     'A': ['alpha_A_1', 'alpha_A_2', 'alpha_A_3'],
     'B': ['alpha_B_1', 'alpha_B_2', 'alpha_B_3'],
     'C': ['alpha_C_1'],
-    'O': ['alpha_O_1']
+    'O': ['alpha_O_1'],
+    // Cursive lowercase letters
+    'i': ['cursive_i_1', 'cursive_i_dot'],
+    't': ['cursive_t_1', 'cursive_t_cross'],
+    'u': ['cursive_u_1', 'cursive_u_exit'],
+    'w': ['cursive_w_1', 'cursive_w_exit'],
+    'e': ['cursive_e_1'],
+    'l': ['cursive_l_1'],
 };
 
 export interface AlphabetTracerProps {
@@ -20,37 +27,108 @@ export interface AlphabetTracerProps {
     onStruggle: () => void;
 }
 
+/**
+ * Build a smooth Skia path from an array of normalized points.
+ * For cursive strokes (keyVal starts with 'cursive_'), uses quadratic
+ * Bézier curves through midpoints for a flowing handwriting look.
+ * Otherwise falls back to straight line segments.
+ */
+function buildSmoothPath(pts: Array<{ x: number, y: number }>, isCursive: boolean) {
+    const path = Skia.Path.Make();
+    if (pts.length === 0) return path;
+
+    path.moveTo(pts[0].x * W, pts[0].y * H);
+
+    if (isCursive && pts.length > 2) {
+        // Smooth quadratic curves through midpoints
+        for (let i = 1; i < pts.length - 1; i++) {
+            const mx = ((pts[i].x + pts[i + 1].x) / 2) * W;
+            const my = ((pts[i].y + pts[i + 1].y) / 2) * H;
+            path.quadTo(pts[i].x * W, pts[i].y * H, mx, my);
+        }
+        // Final segment to the last point
+        const last = pts[pts.length - 1];
+        path.lineTo(last.x * W, last.y * H);
+    } else {
+        for (let i = 1; i < pts.length; i++) {
+            path.lineTo(pts[i].x * W, pts[i].y * H);
+        }
+    }
+
+    return path;
+}
+
 function renderGuidePath(pts: Array<{ x: number, y: number }>, style: 'full' | 'partial' | 'none', keyVal: string) {
     if (style === 'none' || !pts || pts.length === 0) return null;
-    const path = Skia.Path.Make();
-    path.moveTo(pts[0].x * W, pts[0].y * H);
-    for (let i = 1; i < pts.length; i++) {
-        path.lineTo(pts[i].x * W, pts[i].y * H);
-    }
+
+    const isCursive = keyVal.startsWith('cursive_');
+    const path = buildSmoothPath(pts, isCursive);
 
     if (style === 'partial') {
         return (
-            <SkiaPath
-                key={keyVal}
-                path={path}
-                color="rgba(255,255,255,0.4)"
-                style="stroke"
-                strokeWidth={10}
-                strokeCap="round"
-            />
+            <React.Fragment key={keyVal + '_partial'}>
+                {/* Faint glow halo for cursive visibility */}
+                {isCursive && (
+                    <SkiaPath
+                        key={keyVal + '_glow'}
+                        path={path}
+                        color="rgba(255,225,100,0.12)"
+                        style="stroke"
+                        strokeWidth={22}
+                        strokeCap="round"
+                        strokeJoin="round"
+                    />
+                )}
+                <SkiaPath
+                    key={keyVal}
+                    path={path}
+                    color={isCursive ? 'rgba(255,225,100,0.5)' : 'rgba(255,255,255,0.4)'}
+                    style="stroke"
+                    strokeWidth={isCursive ? 8 : 10}
+                    strokeCap="round"
+                    strokeJoin="round"
+                />
+            </React.Fragment>
         );
     }
 
+    // 'full' style — thick guide
     return (
-        <SkiaPath
-            key={keyVal}
-            path={path}
-            color="rgba(255,255,255,0.2)"
-            style="stroke"
-            strokeWidth={30}
-            strokeCap="round"
-            strokeJoin="round"
-        />
+        <React.Fragment key={keyVal + '_full'}>
+            {/* For cursive: outer glow halo */}
+            {isCursive && (
+                <SkiaPath
+                    key={keyVal + '_halo'}
+                    path={path}
+                    color="rgba(255,225,100,0.15)"
+                    style="stroke"
+                    strokeWidth={38}
+                    strokeCap="round"
+                    strokeJoin="round"
+                />
+            )}
+            <SkiaPath
+                key={keyVal}
+                path={path}
+                color={isCursive ? 'rgba(255,225,100,0.25)' : 'rgba(255,255,255,0.2)'}
+                style="stroke"
+                strokeWidth={isCursive ? 14 : 30}
+                strokeCap="round"
+                strokeJoin="round"
+            />
+            {/* For cursive: thin centre-line for precision */}
+            {isCursive && (
+                <SkiaPath
+                    key={keyVal + '_centre'}
+                    path={path}
+                    color="rgba(255,225,100,0.55)"
+                    style="stroke"
+                    strokeWidth={3}
+                    strokeCap="round"
+                    strokeJoin="round"
+                />
+            )}
+        </React.Fragment>
     );
 }
 
@@ -96,7 +174,11 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
 
     const activeStrokeKey = strokes[strokeIdx];
     const expectedPath = expectedPathsData[activeStrokeKey as keyof typeof expectedPathsData];
-    const tolerance = subPhase === '4A' ? 1.5 : subPhase === '4B' ? 1.0 : 0.6;
+    const isCursiveStroke = activeStrokeKey.startsWith('cursive_');
+    // Cursive strokes need more generous tolerance since paths are dense curves
+    const tolerance = subPhase === '4A' ? (isCursiveStroke ? 2.5 : 1.5)
+        : subPhase === '4B' ? (isCursiveStroke ? 1.8 : 1.0)
+            : (isCursiveStroke ? 1.2 : 0.6);
     const guideStyle = subPhase === '4A' ? 'full' : subPhase === '4B' ? 'partial' : 'none';
 
     const handleStrokeSuccess = (drawn: Array<{ x: number, y: number }>) => {
@@ -131,26 +213,39 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
         });
     };
 
+    // Called when user taps "Next" on the success overlay inside StrokeLesson
+    const handleNext = (_acc: number | null) => {
+        handleStrokeSuccess([]); // trigger advance to next stroke
+    };
+
     return (
         <View style={StyleSheet.absoluteFill}>
             {subPhase === '4C' && (
                 <View style={styles.refContainer} pointerEvents="none">
-                    <Text style={styles.refText}>{letterId}</Text>
+                    <Text style={[
+                        styles.refText,
+                        letterId === letterId.toLowerCase() && letterId !== letterId.toUpperCase()
+                            ? styles.refTextCursive
+                            : null
+                    ]}>{letterId}</Text>
                 </View>
             )}
             <StrokeLesson
                 key={activeStrokeKey + subPhase}
                 expectedPath={expectedPath as Array<{ x: number, y: number }>}
                 toleranceMultiplier={tolerance}
-                hideOverlays={true}
+                strokeType={isCursiveStroke ? 'curve' : 'free'}
+                hideOverlays={false}
                 hideHeader={true}
                 hideMilo={false}
                 onFail={handleStrokeFail}
+                onNext={handleNext}
             >
                 {({ drawnPoints, gameState, accuracy }) => {
                     return (
-                        <>
+                        <React.Fragment key={activeStrokeKey + '_children'}>
                             <TraceEffectLayer
+                                key={activeStrokeKey + '_effect'}
                                 gameState={gameState}
                                 drawnPoints={drawnPoints}
                                 onStrokeSuccess={handleStrokeSuccess}
@@ -165,9 +260,9 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
 
                             {/* Completed strokes */}
                             {completedStrokes.map((p, i) => (
-                                <SkiaPath key={i} path={p} color="#FFD700" style="stroke" strokeWidth={15} strokeCap="round" />
+                                <SkiaPath key={'done_' + i} path={p} color="#FFD700" style="stroke" strokeWidth={15} strokeCap="round" />
                             ))}
-                        </>
+                        </React.Fragment>
                     );
                 }}
             </StrokeLesson>
@@ -182,6 +277,7 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
 const styles = StyleSheet.create({
     refContainer: { position: 'absolute', top: 50, right: 30, zIndex: 10, opacity: 0.15 },
     refText: { fontSize: 200, fontWeight: 'bold', color: '#FFF' },
+    refTextCursive: { fontStyle: 'italic', color: '#FFE066' },
     phaseBadge: { position: 'absolute', top: 60, left: 20, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
     phaseText: { color: '#FFF', fontWeight: 'bold' }
 });
