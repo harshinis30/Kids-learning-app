@@ -60,6 +60,24 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="writing-stage2"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="writing-stage3"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="writing-stage4"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
         name="speak"
         options={{
           href: null, // Hide from tab bar (keep for routing)

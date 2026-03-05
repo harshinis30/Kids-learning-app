@@ -29,7 +29,7 @@ import {
   Skia,
   Path as SkiaPath
 } from '@shopify/react-native-skia';
-import { Audio } from 'expo-av';
+import { useAudioPlayer } from 'expo-audio';
 import React, { useCallback, useRef, useState } from 'react';
 import {
   Dimensions,
@@ -53,6 +53,8 @@ import Animated, {
 import expectedPathsData from '../data/expectedPaths.json';
 import { computeAccuracy } from '../utils/accuracy.js';
 import { canProgress, getFeedback } from '../utils/scoring.js';
+
+import { router } from 'expo-router';
 
 // ── Screen dimensions ─────────────────────────────────────────────────────────
 
@@ -89,7 +91,7 @@ const SCENES: SceneConfig[] = [
     hint: '☝️ Drag UP to help Milo climb!',
     strokeType: 'vertical',
     miloStartNorm: { x: 0.5, y: 0.78 },
-    miloEndNorm:   { x: 0.5, y: 0.15 },
+    miloEndNorm: { x: 0.5, y: 0.15 },
   },
   {
     key: 'vine_swing',
@@ -97,7 +99,7 @@ const SCENES: SceneConfig[] = [
     hint: '〜 Trace the swinging arc!',
     strokeType: 'curve',
     miloStartNorm: { x: 0.2, y: 0.25 },
-    miloEndNorm:   { x: 0.8, y: 0.25 },
+    miloEndNorm: { x: 0.8, y: 0.25 },
   },
   {
     key: 'bridge_cross',
@@ -105,7 +107,7 @@ const SCENES: SceneConfig[] = [
     hint: '👉 Drag RIGHT across the stones!',
     strokeType: 'horizontal',
     miloStartNorm: { x: 0.1, y: 0.55 },
-    miloEndNorm:   { x: 0.9, y: 0.55 },
+    miloEndNorm: { x: 0.9, y: 0.55 },
   },
   {
     key: 'cave_tunnel',
@@ -113,7 +115,7 @@ const SCENES: SceneConfig[] = [
     hint: '✨ Follow the glowing dots!',
     strokeType: 'dot-to-dot',
     miloStartNorm: { x: 0.15, y: 0.35 },
-    miloEndNorm:   { x: 0.85, y: 0.40 },
+    miloEndNorm: { x: 0.85, y: 0.40 },
   },
   {
     key: 'hill_slide',
@@ -121,7 +123,7 @@ const SCENES: SceneConfig[] = [
     hint: '↘ Slide diagonally downward!',
     strokeType: 'diagonal',
     miloStartNorm: { x: 0.15, y: 0.2 },
-    miloEndNorm:   { x: 0.85, y: 0.78 },
+    miloEndNorm: { x: 0.85, y: 0.78 },
   },
 ];
 
@@ -221,7 +223,7 @@ function SceneBackground({ sceneIdx }: { sceneIdx: number }) {
           {/* Entry glow */}
           <Circle cx={dots[0].x * W} cy={dots[0].y * H} r={32} color="rgba(255,240,100,0.18)" />
           {/* Exit glow */}
-          <Circle cx={dots[dots.length-1].x * W} cy={dots[dots.length-1].y * H} r={32} color="rgba(100,220,255,0.15)" />
+          <Circle cx={dots[dots.length - 1].x * W} cy={dots[dots.length - 1].y * H} r={32} color="rgba(100,220,255,0.15)" />
         </>
       );
     }
@@ -257,7 +259,7 @@ function GuidePathLayer({ scene }: { scene: SceneConfig }) {
           <React.Fragment key={i}>
             <Circle cx={pt.x * W} cy={pt.y * H} r={22} color="rgba(255,240,80,0.25)" />
             <Circle cx={pt.x * W} cy={pt.y * H} r={14} color="rgba(255,240,80,0.55)" />
-            <Circle cx={pt.x * W} cy={pt.y * H} r={7}  color="rgba(255,255,255,0.95)" />
+            <Circle cx={pt.x * W} cy={pt.y * H} r={7} color="rgba(255,255,255,0.95)" />
           </React.Fragment>
         ))}
       </>
@@ -298,7 +300,7 @@ function GuidePathLayer({ scene }: { scene: SceneConfig }) {
         {pts.map((pt, i) => (
           <React.Fragment key={i}>
             <Circle cx={pt.x * W} cy={pt.y * H} r={12} color="rgba(255,255,255,0.30)" />
-            <Circle cx={pt.x * W} cy={pt.y * H} r={6}  color="rgba(255,255,255,0.95)" />
+            <Circle cx={pt.x * W} cy={pt.y * H} r={6} color="rgba(255,255,255,0.95)" />
           </React.Fragment>
         ))}
       </>
@@ -332,7 +334,7 @@ function GuidePathLayer({ scene }: { scene: SceneConfig }) {
         {pts.map((pt, i) => (
           <React.Fragment key={i}>
             <Circle cx={pt.x * W} cy={pt.y * H} r={16} color="rgba(255,230,100,0.30)" />
-            <Circle cx={pt.x * W} cy={pt.y * H} r={8}  color="rgba(255,230,100,0.95)" />
+            <Circle cx={pt.x * W} cy={pt.y * H} r={8} color="rgba(255,230,100,0.95)" />
           </React.Fragment>
         ))}
       </>
@@ -366,7 +368,7 @@ function GuidePathLayer({ scene }: { scene: SceneConfig }) {
       {pts.map((pt, i) => (
         <React.Fragment key={i}>
           <Circle cx={pt.x * W} cy={pt.y * H} r={12} color="rgba(255,255,255,0.30)" />
-          <Circle cx={pt.x * W} cy={pt.y * H} r={6}  color="rgba(255,255,255,0.95)" />
+          <Circle cx={pt.x * W} cy={pt.y * H} r={6} color="rgba(255,255,255,0.95)" />
         </React.Fragment>
       ))}
     </>
@@ -401,17 +403,11 @@ export default function Stage1Scene1() {
   }));
 
   // ── Sound ───────────────────────────────────────────────────────────────────
-  const playSuccess = useCallback(async () => {
-    try {
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: 'https://www.soundjay.com/buttons/sounds/button-09.mp3' },
-        { shouldPlay: true, volume: 1.0 }
-      );
-      sound.setOnPlaybackStatusUpdate(status => {
-        if (status.isLoaded && status.didJustFinish) sound.unloadAsync();
-      });
-    } catch (_) { /* optional */ }
-  }, []);
+  const player = useAudioPlayer('https://www.soundjay.com/buttons/sounds/button-09.mp3');
+
+  const playSuccess = useCallback(() => {
+    player.play();
+  }, [player]);
 
   // ── Reset current scene ─────────────────────────────────────────────────────
   const resetScene = useCallback(() => {
@@ -530,6 +526,10 @@ export default function Stage1Scene1() {
               }}
             >
               <Text style={styles.retryBtnText}>Play Again 🔁</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.retryBtn} onPress={() => router.push('/writing-stage2')}>
+              <Text style={styles.retryBtnText}>Continue to Stage 2 ➡️</Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>

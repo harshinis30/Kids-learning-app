@@ -95,13 +95,13 @@ function nearestDistance(sample, drawn, W, H) {
  * @param {{ width: number, height: number }} dimensions - Screen pixel size
  * @returns {number} Integer accuracy 0–100
  */
-export function computeAccuracy(drawnPoints, expectedPath, dimensions) {
+export function computeAccuracy(drawnPoints, expectedPath, dimensions, options = { toleranceMultiplier: 1.0 }) {
   if (!drawnPoints || drawnPoints.length < 3) return 0;
   if (!expectedPath || expectedPath.length < 2) return 0;
 
   const { width: W, height: H } = dimensions;
   const SAMPLE_COUNT = 40;
-  const TOLERANCE_PX = Math.hypot(W, H) * 0.20; // 20% of diagonal
+  const TOLERANCE_PX = Math.hypot(W, H) * 0.20 * (options.toleranceMultiplier || 1.0);
 
   const samples = samplePath(expectedPath, SAMPLE_COUNT);
 
