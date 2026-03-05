@@ -1,0 +1,600 @@
+[
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularColorFactor": [
+          1.2000000476837158,
+          1.2000000476837158,
+          1.2000000476837158
+        ]
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.body.1001",
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {
+        "index": 0
+      },
+      "metallicFactor": 0,
+      "metallicRoughnessTexture": {
+        "index": 1
+      }
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularColorFactor": [
+          1.2000000476837158,
+          1.2000000476837158,
+          1.2000000476837158
+        ]
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.body.1002",
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {
+        "index": 2
+      },
+      "metallicFactor": 0,
+      "metallicRoughnessTexture": {
+        "index": 3
+      }
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularColorFactor": [
+          1.2000000476837158,
+          1.2000000476837158,
+          1.2000000476837158
+        ]
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.hands",
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {
+        "index": 4
+      },
+      "metallicFactor": 0,
+      "metallicRoughnessTexture": {
+        "index": 5
+      }
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularColorFactor": [
+          1.2000000476837158,
+          1.2000000476837158,
+          1.2000000476837158
+        ]
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.body.1001",
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {
+        "index": 0
+      },
+      "metallicFactor": 0,
+      "metallicRoughnessTexture": {
+        "index": 1
+      }
+    }
+  },
+  {
+    "name": "MAT-rain.cornea"
+  },
+  {
+    "doubleSided": true,
+    "emissiveFactor": [
+      1,
+      1,
+      1
+    ],
+    "extensions": {
+      "KHR_materials_emissive_strength": {
+        "emissiveStrength": 2
+      }
+    },
+    "name": "MAT-rain.eyedot",
+    "pbrMetallicRoughness": {
+      "baseColorFactor": [
+        0,
+        0,
+        0,
+        1
+      ]
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_clearcoat": {
+        "clearcoatRoughnessFactor": 0
+      },
+      "KHR_materials_specular": {
+        "specularFactor": 0.5
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.eyebrows",
+    "pbrMetallicRoughness": {
+      "metallicFactor": 0,
+      "roughnessFactor": 0.6499999761581421
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_clearcoat": {
+        "clearcoatRoughnessFactor": 0
+      },
+      "KHR_materials_specular": {
+        "specularFactor": 0.5
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.eyelashes",
+    "pbrMetallicRoughness": {
+      "metallicFactor": 0,
+      "roughnessFactor": 0.6499999761581421
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularTexture": {
+          "index": 6
+        },
+        "specularColorTexture": {
+          "index": 7
+        }
+      },
+      "KHR_materials_sheen": {
+        "sheenColorFactor": [
+          1,
+          1,
+          1
+        ],
+        "sheenRoughnessFactor": 0.5
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.eyes",
+    "normalTexture": {
+      "index": 8
+    },
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {
+        "index": 9
+      },
+      "metallicFactor": 0,
+      "metallicRoughnessTexture": {
+        "index": 10
+      }
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularTexture": {
+          "index": 11
+        },
+        "specularColorTexture": {
+          "index": 12
+        }
+      },
+      "KHR_materials_sheen": {
+        "sheenColorFactor": [
+          1,
+          1,
+          1
+        ],
+        "sheenRoughnessFactor": 0.5
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.eyes.viewport_white",
+    "normalTexture": {
+      "index": 13
+    },
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {
+        "index": 14
+      },
+      "metallicFactor": 0,
+      "metallicRoughnessTexture": {
+        "index": 15
+      }
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularTexture": {
+          "index": 16
+        },
+        "specularColorTexture": {
+          "index": 17
+        }
+      },
+      "KHR_materials_sheen": {
+        "sheenColorFactor": [
+          1,
+          1,
+          1
+        ],
+        "sheenRoughnessFactor": 0.5
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.eyes.viewport_blue",
+    "normalTexture": {
+      "index": 18
+    },
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {
+        "index": 19
+      },
+      "metallicFactor": 0,
+      "metallicRoughnessTexture": {
+        "index": 20
+      }
+    }
+  },
+  {
+    "doubleSided": true,
+    "emissiveFactor": [
+      1,
+      1,
+      1
+    ],
+    "emissiveTexture": {
+      "index": 21
+    },
+    "name": "MAT-rain.eyes.viewport_black",
+    "pbrMetallicRoughness": {
+      "baseColorFactor": [
+        0,
+        0,
+        0,
+        1
+      ]
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularColorFactor": [
+          2,
+          2,
+          2
+        ]
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.gums",
+    "pbrMetallicRoughness": {
+      "metallicFactor": 0,
+      "roughnessFactor": 0.3918032646179199
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularColorFactor": [
+          2,
+          2,
+          2
+        ]
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.teeth",
+    "pbrMetallicRoughness": {
+      "metallicFactor": 0,
+      "roughnessFactor": 0.34918034076690674
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_clearcoat": {
+        "clearcoatRoughnessFactor": 0
+      },
+      "KHR_materials_specular": {
+        "specularFactor": 0.6000000238418579,
+        "specularColorTexture": {
+          "index": 22
+        }
+      },
+      "KHR_materials_anisotropy": {
+        "anisotropyStrength": 1,
+        "anisotropyTexture": {
+          "index": 23,
+          "texCoord": 1
+        }
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.hair",
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {
+        "index": 24
+      },
+      "metallicFactor": 0,
+      "metallicRoughnessTexture": {
+        "index": 25,
+        "texCoord": 1
+      }
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularFactor": 0.6000000238418579
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.hairband",
+    "pbrMetallicRoughness": {
+      "metallicFactor": 0,
+      "roughnessFactor": 0.699999988079071
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularColorFactor": [
+          1.2000000476837158,
+          1.2000000476837158,
+          1.2000000476837158
+        ]
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.body.1003",
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {
+        "index": 26
+      },
+      "metallicFactor": 0,
+      "metallicRoughnessTexture": {
+        "index": 27
+      }
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularFactor": 0.8999999761581421
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.jeans",
+    "normalTexture": {
+      "index": 28,
+      "scale": 0.07999999821186066
+    },
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {
+        "index": 29
+      },
+      "metallicFactor": 0,
+      "metallicRoughnessTexture": {
+        "index": 30
+      }
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularColorFactor": [
+          1.2000000476837158,
+          1.2000000476837158,
+          1.2000000476837158
+        ]
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.scarf",
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {
+        "index": 31
+      },
+      "metallicFactor": 0.4000000059604645,
+      "metallicRoughnessTexture": {
+        "index": 32
+      }
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularFactor": 0
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.shoes",
+    "pbrMetallicRoughness": {
+      "metallicFactor": 0,
+      "roughnessFactor": 0.7942622900009155
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularColorFactor": [
+          2,
+          2,
+          2
+        ]
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.metal",
+    "pbrMetallicRoughness": {
+      "baseColorFactor": [
+        0.39029616117477417,
+        0.39029616117477417,
+        0.39029616117477417,
+        1
+      ],
+      "roughnessFactor": 0.4475409984588623
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularFactor": 0.6000000238418579
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.socks",
+    "normalTexture": {
+      "index": 33
+    },
+    "pbrMetallicRoughness": {
+      "baseColorFactor": [
+        0.800000011920929,
+        0.800000011920929,
+        0.800000011920929,
+        1
+      ],
+      "metallicFactor": 0,
+      "metallicRoughnessTexture": {
+        "index": 34
+      }
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularFactor": 0.800000011920929
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.laces",
+    "pbrMetallicRoughness": {
+      "baseColorFactor": [
+        0.4106719493865967,
+        0.4106719493865967,
+        0.4106719493865967,
+        1
+      ],
+      "metallicFactor": 0,
+      "roughnessFactor": 0.8500000238418579
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularColorFactor": [
+          2,
+          2,
+          2
+        ]
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.tongue",
+    "pbrMetallicRoughness": {
+      "metallicFactor": 0,
+      "roughnessFactor": 0.5
+    }
+  },
+  {
+    "doubleSided": true,
+    "extensions": {
+      "KHR_materials_specular": {
+        "specularColorFactor": [
+          2,
+          2,
+          2
+        ]
+      },
+      "KHR_materials_ior": {
+        "ior": 1.4500000476837158
+      }
+    },
+    "name": "MAT-rain.top",
+    "normalTexture": {
+      "index": 35
+    },
+    "pbrMetallicRoughness": {
+      "baseColorTexture": {
+        "index": 36
+      },
+      "metallicFactor": 0,
+      "metallicRoughnessTexture": {
+        "index": 37
+      }
+    }
+  }
+]
