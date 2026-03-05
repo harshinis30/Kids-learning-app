@@ -17,9 +17,9 @@ const STAGE3_LEVELS = [
         prompt: 'Tap the mountain sign "A"',
         correctId: 'A',
         options: [
-            { id: 'A', label: 'A', xNorm: 0.2, yNorm: 0.5 },
-            { id: 'B', label: 'B', xNorm: 0.5, yNorm: 0.5 },
-            { id: 'C', label: 'C', xNorm: 0.8, yNorm: 0.5 }
+            { id: 'A', label: 'A', xNorm: 0.2, yNorm: 0.7 },
+            { id: 'B', label: 'B', xNorm: 0.5, yNorm: 0.7 },
+            { id: 'C', label: 'C', xNorm: 0.8, yNorm: 0.7 }
         ]
     },
     {
@@ -27,8 +27,8 @@ const STAGE3_LEVELS = [
         prompt: 'Match uppercase to lowercase (C ➡️ c)',
         correctId: 'c',
         options: [
-            { id: 'a', label: 'a', xNorm: 0.3, yNorm: 0.6 },
-            { id: 'c', label: 'c', xNorm: 0.7, yNorm: 0.6 }
+            { id: 'a', label: 'a', xNorm: 0.25, yNorm: 0.55 },
+            { id: 'c', label: 'c', xNorm: 0.75, yNorm: 0.55 }
         ]
     },
     {
@@ -36,9 +36,9 @@ const STAGE3_LEVELS = [
         prompt: 'Find the odd one out!',
         correctId: 'C',
         options: [
-            { id: 'O1', label: 'O', xNorm: 0.2, yNorm: 0.5 },
-            { id: 'C', label: 'C', xNorm: 0.5, yNorm: 0.5 },
-            { id: 'O2', label: 'O', xNorm: 0.8, yNorm: 0.5 }
+            { id: 'O1', label: 'O', xNorm: 0.2, yNorm: 0.7 },
+            { id: 'C', label: 'C', xNorm: 0.5, yNorm: 0.7 },
+            { id: 'O2', label: 'O', xNorm: 0.8, yNorm: 0.7 }
         ]
     }
 ];

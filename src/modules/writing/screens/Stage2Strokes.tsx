@@ -64,8 +64,8 @@ function BlueprintGuide({ sceneKey }: { sceneKey: string }) {
 }
 
 function Scene2Foreground({ sceneIdx, progress, success }: { sceneIdx: number, progress: number, success: boolean }) {
-    // when success, opacity is fully 1.0!
-    const op = success ? 1 : progress;
+    // when success, opacity is fully 1.0. Otherwise keep it faintly visible (0.3).
+    const op = success ? 1 : Math.max(0.3, progress);
 
     if (sceneIdx === 0) { // Tree
         return (
@@ -81,30 +81,47 @@ function Scene2Foreground({ sceneIdx, progress, success }: { sceneIdx: number, p
         );
     }
     if (sceneIdx === 2) { // Rainbow
+        const path1 = Skia.Path.Make();
+        path1.moveTo(W * 0.1, H * 0.6);
+        path1.quadTo(W * 0.5, H * -0.2, W * 0.9, H * 0.6);
+
+        const path2 = Skia.Path.Make();
+        path2.moveTo(W * 0.15, H * 0.6);
+        path2.quadTo(W * 0.5, H * -0.1, W * 0.85, H * 0.6);
+
+        const path3 = Skia.Path.Make();
+        path3.moveTo(W * 0.2, H * 0.6);
+        path3.quadTo(W * 0.5, H * 0.0, W * 0.8, H * 0.6);
+
         return (
             <>
-                <Circle cx={W / 2} cy={H * 0.6} r={W * 0.4} color={`rgba(255,64,129,${op})`} style="stroke" strokeWidth={20} />
-                <Circle cx={W / 2} cy={H * 0.6} r={W * 0.35} color={`rgba(255,152,0,${op})`} style="stroke" strokeWidth={20} />
-                <Circle cx={W / 2} cy={H * 0.6} r={W * 0.3} color={`rgba(255,235,59,${op})`} style="stroke" strokeWidth={20} />
+                <SkiaPath path={path1} color={`rgba(255,64,129,${op})`} style="stroke" strokeWidth={20} strokeCap="round" />
+                <SkiaPath path={path2} color={`rgba(255,152,0,${op})`} style="stroke" strokeWidth={20} strokeCap="round" />
+                <SkiaPath path={path3} color={`rgba(255,235,59,${op})`} style="stroke" strokeWidth={20} strokeCap="round" />
             </>
         );
     }
     if (sceneIdx === 3) { // River
         const riverPath = Skia.Path.Make();
         riverPath.moveTo(W * 0.5, H * 0.1);
-        riverPath.quadTo(W * 0.8, H * 0.3, W * 0.2, H * 0.6);
-        riverPath.quadTo(W * 0.5, H * 0.9, W * 0.5, H * 0.9);
-        return <SkiaPath path={riverPath} color={`rgba(3,169,244,${op})`} style="stroke" strokeWidth={60} strokeCap="round" />;
+        riverPath.lineTo(W * 0.8, H * 0.3);
+        riverPath.lineTo(W * 0.2, H * 0.6);
+        riverPath.lineTo(W * 0.5, H * 0.9);
+        return <SkiaPath path={riverPath} color={`rgba(3,169,244,${op})`} style="stroke" strokeWidth={60} strokeCap="round" strokeJoin="round" />;
     }
     if (sceneIdx === 4) { // Mountain
         const mountainPath = Skia.Path.Make();
-        mountainPath.moveTo(W * 0.1, H * 0.8);
+        mountainPath.moveTo(W * 0.2, H * 0.8);
         mountainPath.lineTo(W * 0.5, H * 0.2);
-        mountainPath.lineTo(W * 0.9, H * 0.8);
-        return <SkiaPath path={mountainPath} color={`rgba(158,158,158,${op})`} style="stroke" strokeWidth={20} strokeCap="round" />;
+        mountainPath.lineTo(W * 0.8, H * 0.8);
+        return <SkiaPath path={mountainPath} color={`rgba(158,158,158,${op})`} style="stroke" strokeWidth={20} strokeCap="round" strokeJoin="round" />;
     }
     if (sceneIdx === 5) { // Moon
-        return <Circle cx={W * 0.6} cy={H * 0.4} r={80} color={`rgba(255,235,59,${op})`} />;
+        const moonPath = Skia.Path.Make();
+        moonPath.moveTo(W * 0.6, H * 0.2);
+        moonPath.quadTo(W * 0.1, H * 0.5, W * 0.6, H * 0.8);
+        moonPath.quadTo(W * 0.3, H * 0.5, W * 0.6, H * 0.2);
+        return <SkiaPath path={moonPath} color={`rgba(255,235,59,${op})`} style="fill" />;
     }
 
     return null;
