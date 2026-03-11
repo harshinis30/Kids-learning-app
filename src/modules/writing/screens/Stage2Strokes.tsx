@@ -1,218 +1,1185 @@
-import { Circle, Rect, Skia, Path as SkiaPath } from '@shopify/react-native-skia';
+/**
+ * Stage2Strokes.tsx — "Shape & Curve Practice" · Level 2
+ *
+ * 9 sequential levels: Wave, Spiral, Loop, Circle, Oval, Square, Triangle, Diamond, Star
+ * Features a cheerful level-select path + individual drawing canvases with a 3-phase
+ * guided pointer system, star earning, adaptive tracking, and Milo reactions.
+ *
+ * 2D flat illustration only — Toca Boca meets Duolingo Kids.
+ */
+
 import { router } from 'expo-router';
-import React, { useState } from 'react';
-import { Dimensions, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import StrokeLesson from '../components/StrokeLesson';
-import expectedPathsData from '../data/expectedPaths.json';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    Animated,
+    Dimensions,
+    PanResponder,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import Svg, { Circle, Ellipse, G, Path, Rect } from 'react-native-svg';
+import { useWritingCompletion } from './WritingLevelHub';
+
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const { width: W, height: H } = Dimensions.get('window');
 
-const STAGE2_SCENES = [
+const PAL = {
+    sky: '#E8F4FD',
+    skyDeep: '#87CEEB',
+    canvas: '#FFFDF5',
+    sun: '#FFD700',
+    mint: '#7EFFD4',
+    coral: '#FF7F6E',
+    lavender: '#C5B4E3',
+    grassLight: '#A8E6A1',
+    grassDark: '#7BC67E',
+    brown: '#8D6E63',
+    textDark: '#3E2723',
+    white: '#FFF',
+    lockGray: '#B0BEC5',
+};
+
+const TRAIL_COLORS = ['#FF7F6E', '#87CEEB', '#98E8C1', '#C5B4E3', '#FFD700', '#FF7F6E', '#87CEEB', '#98E8C1', '#C5B4E3'];
+
+// ── Shape Definitions ─────────────────────────────────────────────────────────
+
+interface LevelDef {
+    id: number;
+    name: string;
+    emoji: string;
+    section: 'A' | 'B';
+    /** Normalized points (0-1) defining the guide path on the canvas */
+    guidePath: Array<{ x: number; y: number }>;
+    /** Whether path is a closed shape */
+    closed: boolean;
+    /** Whether to render as smooth curve */
+    smooth: boolean;
+    /** Corner/key-point indices for numbered dots */
+    keyPoints: number[];
+    /** Tolerance radius in px */
+    tolerance: number;
+}
+
+const LEVELS: LevelDef[] = [
+    // Section A — Curves
     {
-        key: 'stage2_tree', title: '🌳 Build a Tree', hint: '☝️ Draw a vertical line!', strokeType: 'vertical' as const,
-        miloStartNorm: { x: 0.5, y: 0.8 }, miloEndNorm: { x: 0.5, y: 0.2 },
-        color: '#4CAF50'
+        id: 1, name: 'Wave', emoji: '🌊', section: 'A',
+        guidePath: Array.from({ length: 30 }, (_, i) => ({
+            x: 0.1 + (i / 29) * 0.8,
+            y: 0.5 + Math.sin((i / 29) * Math.PI * 3) * 0.15,
+        })),
+        closed: false, smooth: true, keyPoints: [0, 7, 15, 22, 29], tolerance: 30,
     },
     {
-        key: 'stage2_bridge', title: '🌉 Build a Bridge', hint: '👉 Draw a horizontal line!', strokeType: 'horizontal' as const,
-        miloStartNorm: { x: 0.1, y: 0.5 }, miloEndNorm: { x: 0.9, y: 0.5 },
-        color: '#795548'
+        id: 2, name: 'Spiral', emoji: '🌀', section: 'A',
+        guidePath: Array.from({ length: 40 }, (_, i) => {
+            const t = i / 39;
+            const angle = t * Math.PI * 4;
+            const r = 0.35 - t * 0.28;
+            return { x: 0.5 + Math.cos(angle) * r, y: 0.5 + Math.sin(angle) * r };
+        }),
+        closed: false, smooth: true, keyPoints: [0, 10, 20, 30, 39], tolerance: 32,
     },
     {
-        key: 'stage2_rainbow', title: '🌈 Make a Rainbow', hint: '〜 Draw a big curve!', strokeType: 'curve' as const,
-        miloStartNorm: { x: 0.1, y: 0.6 }, miloEndNorm: { x: 0.9, y: 0.6 },
-        color: '#FF4081'
+        id: 3, name: 'Loop', emoji: '➰', section: 'A',
+        guidePath: Array.from({ length: 36 }, (_, i) => {
+            const t = (i / 35) * Math.PI * 2;
+            return {
+                x: 0.5 + Math.cos(t) * 0.25 + Math.cos(t * 2) * 0.08,
+                y: 0.5 + Math.sin(t) * 0.3,
+            };
+        }),
+        closed: true, smooth: true, keyPoints: [0, 9, 18, 27], tolerance: 30,
+    },
+    // Section B — Shapes
+    {
+        id: 4, name: 'Circle', emoji: '⭕', section: 'B',
+        guidePath: Array.from({ length: 36 }, (_, i) => {
+            const t = (i / 35) * Math.PI * 2;
+            return { x: 0.5 + Math.cos(t - Math.PI / 2) * 0.3, y: 0.5 + Math.sin(t - Math.PI / 2) * 0.3 };
+        }),
+        closed: true, smooth: true, keyPoints: [0, 9, 18, 27], tolerance: 28,
     },
     {
-        key: 'stage2_river', title: '🌊 Carve a River', hint: '〰️ Draw an S-curve!', strokeType: 'curve' as const,
-        miloStartNorm: { x: 0.5, y: 0.1 }, miloEndNorm: { x: 0.5, y: 0.9 },
-        color: '#03A9F4'
+        id: 5, name: 'Oval', emoji: '🥚', section: 'B',
+        guidePath: Array.from({ length: 36 }, (_, i) => {
+            const t = (i / 35) * Math.PI * 2;
+            return { x: 0.5 + Math.cos(t - Math.PI / 2) * 0.35, y: 0.5 + Math.sin(t - Math.PI / 2) * 0.22 };
+        }),
+        closed: true, smooth: true, keyPoints: [0, 9, 18, 27], tolerance: 28,
     },
     {
-        key: 'stage2_mountain', title: '⛰️ Make a Mountain', hint: 'Draw a mountain peak!', strokeType: 'free' as const,
-        miloStartNorm: { x: 0.2, y: 0.8 }, miloEndNorm: { x: 0.8, y: 0.8 },
-        color: '#9E9E9E'
+        id: 6, name: 'Square', emoji: '⬜', section: 'B',
+        guidePath: [
+            { x: 0.25, y: 0.25 }, { x: 0.75, y: 0.25 }, { x: 0.75, y: 0.75 }, { x: 0.25, y: 0.75 }, { x: 0.25, y: 0.25 },
+        ],
+        closed: true, smooth: false, keyPoints: [0, 1, 2, 3, 4], tolerance: 30,
     },
     {
-        key: 'stage2_moon', title: '🌙 Draw the Moon', hint: '☾ Draw a C-curve!', strokeType: 'curve' as const,
-        miloStartNorm: { x: 0.6, y: 0.2 }, miloEndNorm: { x: 0.6, y: 0.8 },
-        color: '#FFEB3B'
-    }
+        id: 7, name: 'Triangle', emoji: '🔺', section: 'B',
+        guidePath: [
+            { x: 0.5, y: 0.2 }, { x: 0.8, y: 0.8 }, { x: 0.2, y: 0.8 }, { x: 0.5, y: 0.2 },
+        ],
+        closed: true, smooth: false, keyPoints: [0, 1, 2, 3], tolerance: 30,
+    },
+    {
+        id: 8, name: 'Diamond', emoji: '💎', section: 'B',
+        guidePath: [
+            { x: 0.5, y: 0.15 }, { x: 0.85, y: 0.5 }, { x: 0.5, y: 0.85 }, { x: 0.15, y: 0.5 }, { x: 0.5, y: 0.15 },
+        ],
+        closed: true, smooth: false, keyPoints: [0, 1, 2, 3, 4], tolerance: 30,
+    },
+    {
+        id: 9, name: 'Star', emoji: '⭐', section: 'B',
+        guidePath: (() => {
+            const pts: Array<{ x: number; y: number }> = [];
+            for (let i = 0; i < 5; i++) {
+                const outerAngle = (i * 2 * Math.PI) / 5 - Math.PI / 2;
+                pts.push({ x: 0.5 + Math.cos(outerAngle) * 0.38, y: 0.5 + Math.sin(outerAngle) * 0.38 });
+                const innerAngle = outerAngle + Math.PI / 5;
+                pts.push({ x: 0.5 + Math.cos(innerAngle) * 0.16, y: 0.5 + Math.sin(innerAngle) * 0.16 });
+            }
+            pts.push(pts[0]); // close
+            return pts;
+        })(),
+        closed: true, smooth: false, keyPoints: [0, 2, 4, 6, 8, 10], tolerance: 38,
+    },
 ];
 
-function BlueprintGuide({ sceneKey }: { sceneKey: string }) {
-    const pts = expectedPathsData[sceneKey as keyof typeof expectedPathsData] as Array<{ x: number, y: number }>;
-    if (!pts || pts.length === 0) return null;
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-    const path = Skia.Path.Make();
-    path.moveTo(pts[0].x * W, pts[0].y * H);
-    for (let i = 1; i < pts.length; i++) {
-        path.lineTo(pts[i].x * W, pts[i].y * H);
+function buildSvgPath(
+    pts: Array<{ x: number; y: number }>,
+    canvasW: number,
+    canvasH: number,
+    smooth: boolean
+): string {
+    if (!pts || pts.length === 0) return '';
+    const p = pts.map(pt => ({ x: pt.x * canvasW, y: pt.y * canvasH }));
+    if (p.length === 1) return `M ${p[0].x} ${p[0].y}`;
+    let d = `M ${p[0].x} ${p[0].y}`;
+    if (smooth && p.length > 2) {
+        for (let i = 1; i < p.length - 1; i++) {
+            const mx = (p[i].x + p[i + 1].x) / 2;
+            const my = (p[i].y + p[i + 1].y) / 2;
+            d += ` Q ${p[i].x} ${p[i].y} ${mx} ${my}`;
+        }
+        d += ` L ${p[p.length - 1].x} ${p[p.length - 1].y}`;
+    } else {
+        for (let i = 1; i < p.length; i++) {
+            d += ` L ${p[i].x} ${p[i].y}`;
+        }
     }
+    return d;
+}
+
+function dist(a: { x: number; y: number }, b: { x: number; y: number }) {
+    return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+}
+
+function nearestDistToPath(
+    px: number,
+    py: number,
+    pts: Array<{ x: number; y: number }>,
+    cW: number,
+    cH: number
+): number {
+    let min = Infinity;
+    for (const pt of pts) {
+        const d = dist({ x: px, y: py }, { x: pt.x * cW, y: pt.y * cH });
+        if (d < min) min = d;
+    }
+    return min;
+}
+
+// ── Persistent Level Progress ─────────────────────────────────────────────────
+
+interface LevelProgress {
+    starsEarned: number;
+    completed: boolean;
+    attempts: number;
+    offPathCount: number;
+    phaseReached: number;
+}
+
+function getInitialProgress(): Record<number, LevelProgress> {
+    const p: Record<number, LevelProgress> = {};
+    LEVELS.forEach(l => {
+        p[l.id] = { starsEarned: 0, completed: false, attempts: 0, offPathCount: 0, phaseReached: 0 };
+    });
+    return p;
+}
+
+// ── Level Select Background ──────────────────────────────────────────────────
+
+function LevelSelectBg() {
+    return (
+        <Svg width={W} height={H} style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Rect x={0} y={0} width={W} height={H} fill={PAL.sky} />
+            {/* Sun */}
+            <Circle cx={W * 0.85} cy={H * 0.06} r={50} fill={PAL.sun} opacity={0.9} />
+            <Circle cx={W * 0.85} cy={H * 0.06} r={65} fill={PAL.sun} opacity={0.15} />
+            {/* Clouds */}
+            <Ellipse cx={W * 0.15} cy={H * 0.05} rx={55} ry={20} fill={PAL.white} opacity={0.85} />
+            <Ellipse cx={W * 0.5} cy={H * 0.08} rx={65} ry={22} fill={PAL.white} opacity={0.7} />
+            {/* Hills */}
+            <Ellipse cx={W * 0.3} cy={H * 0.92} rx={W * 0.6} ry={120} fill={PAL.grassLight} />
+            <Ellipse cx={W * 0.8} cy={H * 0.95} rx={W * 0.5} ry={100} fill={PAL.grassDark} />
+            <Rect x={0} y={H * 0.88} width={W} height={H * 0.12} fill={PAL.grassDark} />
+        </Svg>
+    );
+}
+
+// ── Level Bubble ──────────────────────────────────────────────────────────────
+
+function LevelBubble({
+    level,
+    progress,
+    isCurrent,
+    onPress,
+}: {
+    level: LevelDef;
+    progress: LevelProgress;
+    isCurrent: boolean;
+    onPress: () => void;
+}) {
+    const [pulseAnim] = useState(new Animated.Value(1));
+
+    useEffect(() => {
+        if (isCurrent) {
+            Animated.loop(
+                Animated.sequence([
+                    Animated.timing(pulseAnim, { toValue: 1.12, duration: 800, useNativeDriver: true }),
+                    Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+                ])
+            ).start();
+        } else {
+            pulseAnim.setValue(1);
+        }
+    }, [isCurrent, pulseAnim]);
+
+    const unlocked = progress.completed || isCurrent || level.id === 1;
+    const completed = progress.completed;
 
     return (
-        <SkiaPath
-            path={path}
-            color="rgba(255,255,255,0.2)"
-            style="stroke"
-            strokeWidth={20}
-            strokeCap="round"
-            strokeJoin="round"
+        <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={s.bubbleTouch}>
+            <Animated.View
+                style={[
+                    s.bubbleOuter,
+                    !unlocked && s.bubbleLocked,
+                    isCurrent && s.bubbleCurrent,
+                    { transform: [{ scale: pulseAnim }] },
+                ]}
+            >
+                {/* Shape mini-preview */}
+                <View style={[s.bubbleInner, !unlocked && { opacity: 0.3 }]}>
+                    <Text style={s.bubbleEmoji}>{level.emoji}</Text>
+                </View>
+
+                {/* Stars on top */}
+                {completed && progress.starsEarned > 0 && (
+                    <View style={s.bubbleStars}>
+                        {Array.from({ length: Math.min(progress.starsEarned, 3) }, (_, i) => (
+                            <Text key={i} style={{ fontSize: 12 }}>⭐</Text>
+                        ))}
+                    </View>
+                )}
+
+                {/* Lock icon */}
+                {!unlocked && (
+                    <View style={s.lockOverlay}>
+                        <Text style={{ fontSize: 22 }}>🔒</Text>
+                    </View>
+                )}
+            </Animated.View>
+
+            {/* Label */}
+            <Text style={[s.bubbleLabel, !unlocked && { color: PAL.lockGray }]}>{level.name}</Text>
+
+            {/* Milo stands next to current level */}
+            {isCurrent && (
+                <Text style={s.miloAtBubble}>🐵</Text>
+            )}
+        </TouchableOpacity>
+    );
+}
+
+// ── Milo Reactions ────────────────────────────────────────────────────────────
+
+type MiloState = 'idle' | 'demo' | 'good' | 'offpath' | 'segment' | 'complete' | 'star' | 'nudge' | 'boss';
+
+function MiloReactor({ state }: { state: MiloState }) {
+    const [bounceAnim] = useState(new Animated.Value(0));
+    const [scaleAnim] = useState(new Animated.Value(1));
+
+    useEffect(() => {
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(bounceAnim, { toValue: -10, duration: 600, useNativeDriver: true }),
+                Animated.timing(bounceAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
+            ])
+        ).start();
+    }, [bounceAnim]);
+
+    useEffect(() => {
+        if (state === 'complete' || state === 'star' || state === 'boss') {
+            Animated.sequence([
+                Animated.spring(scaleAnim, { toValue: 1.4, friction: 3, useNativeDriver: true }),
+                Animated.spring(scaleAnim, { toValue: 1, friction: 4, useNativeDriver: true }),
+            ]).start();
+        } else if (state === 'segment') {
+            Animated.sequence([
+                Animated.spring(scaleAnim, { toValue: 1.2, friction: 3, useNativeDriver: true }),
+                Animated.spring(scaleAnim, { toValue: 1, friction: 4, useNativeDriver: true }),
+            ]).start();
+        }
+    }, [state, scaleAnim]);
+
+    const emojiMap: Record<MiloState, string> = {
+        idle: '🐵', demo: '👉', good: '👍', offpath: '🤔',
+        segment: '👏', complete: '🙌', star: '🌟', nudge: '👋', boss: '🕺',
+    };
+    const speechMap: Record<MiloState, string> = {
+        idle: '', demo: '👀', good: '✨', offpath: '❓',
+        segment: '⭐', complete: '🎉', star: '⭐', nudge: '☝️', boss: '🏆',
+    };
+
+    return (
+        <View style={s.miloZone} pointerEvents="none">
+            {speechMap[state] !== '' && (
+                <View style={s.miloBubble}>
+                    <Text style={{ fontSize: 18 }}>{speechMap[state]}</Text>
+                </View>
+            )}
+            <Animated.View style={{ transform: [{ translateY: bounceAnim }, { scale: scaleAnim }] }}>
+                <Text style={{ fontSize: 55 }}>{emojiMap[state]}</Text>
+            </Animated.View>
+        </View>
+    );
+}
+
+// ── Sparkle Ball (Demo Guide) ─────────────────────────────────────────────────
+
+function SparkleBall({ x, y, visible }: { x: number; y: number; visible: boolean }) {
+    const [pulseAnim] = useState(new Animated.Value(1));
+
+    useEffect(() => {
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(pulseAnim, { toValue: 1.3, duration: 400, useNativeDriver: true }),
+                Animated.timing(pulseAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+            ])
+        ).start();
+    }, [pulseAnim]);
+
+    if (!visible) return null;
+
+    return (
+        <Animated.View
+            style={[
+                s.sparkleBall,
+                {
+                    left: x - 18,
+                    top: y - 18,
+                    transform: [{ scale: pulseAnim }],
+                },
+            ]}
+            pointerEvents="none"
+        >
+            <Text style={{ fontSize: 28 }}>✨</Text>
+        </Animated.View>
+    );
+}
+
+// ── Star Pop Animation ────────────────────────────────────────────────────────
+
+function StarSlots({ earned }: { earned: number }) {
+    return (
+        <View style={s.starSlots}>
+            {[1, 2, 3].map(i => (
+                <Text key={i} style={[s.starSlot, i <= earned && s.starSlotEarned]}>
+                    {i <= earned ? '⭐' : '☆'}
+                </Text>
+            ))}
+        </View>
+    );
+}
+
+// ── Confetti ──────────────────────────────────────────────────────────────────
+
+function MiniConfetti({ visible }: { visible: boolean }) {
+    const [pieces] = useState(() =>
+        Array.from({ length: 16 }, (_, i) => ({
+            anim: new Animated.Value(0),
+            x: Math.random() * W,
+            emoji: ['🎊', '🎉', '✨', '⭐', '💫', '🌈'][i % 6],
+            delay: Math.random() * 300,
+        }))
+    );
+
+    useEffect(() => {
+        if (visible) {
+            pieces.forEach(p => {
+                p.anim.setValue(0);
+                Animated.timing(p.anim, { toValue: 1, duration: 1800, delay: p.delay, useNativeDriver: true }).start();
+            });
+        }
+    }, [visible, pieces]);
+
+    if (!visible) return null;
+
+    return (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {pieces.map((p, i) => {
+                const ty = p.anim.interpolate({ inputRange: [0, 1], outputRange: [-40, H + 40] });
+                const opacity = p.anim.interpolate({ inputRange: [0, 0.8, 1], outputRange: [1, 1, 0] });
+                return (
+                    <Animated.Text key={i} style={{ position: 'absolute', left: p.x, top: 0, fontSize: 22, transform: [{ translateY: ty }], opacity }}>
+                        {p.emoji}
+                    </Animated.Text>
+                );
+            })}
+        </View>
+    );
+}
+
+// ── Canvas Drawing Surface ────────────────────────────────────────────────────
+
+const CANVAS_PAD = 20;
+const CANVAS_W = W - CANVAS_PAD * 2;
+const CANVAS_H = H * 0.55;
+
+type Phase = 'demo' | 'guided' | 'free';
+
+function DrawingCanvas({
+    level,
+    onComplete,
+    onStarEarned,
+}: {
+    level: LevelDef;
+    onComplete: (stars: number) => void;
+    onStarEarned: (starNum: number) => void;
+}) {
+    const [phase, setPhase] = useState<Phase>('demo');
+    const [miloState, setMiloState] = useState<MiloState>('idle');
+    const [drawnPath, setDrawnPath] = useState('');
+    const drawnPathRef = useRef(''); // Instant sync — avoids React batching SVG parse errors
+    const [starsEarned, setStarsEarned] = useState(0);
+    const [showConfetti, setShowConfetti] = useState(false);
+    const [sparklePos, setSparklePos] = useState({ x: 0, y: 0 });
+    const [sparkleVisible, setSparkleVisible] = useState(false);
+    const [demoProgress, setDemoProgress] = useState(0);
+    const [showGuide, setShowGuide] = useState(true);
+    const [showKeyDots, setShowKeyDots] = useState(true);
+    const [isDrawing, setIsDrawing] = useState(false);
+    const [completed, setCompleted] = useState(false);
+
+    // *** CRITICAL: Use refs so PanResponder always reads latest state ***
+    const phaseRef = useRef<Phase>(phase);
+    const completedRef = useRef(completed);
+    const starsEarnedRef = useRef(starsEarned);
+    useEffect(() => { phaseRef.current = phase; }, [phase]);
+    useEffect(() => { completedRef.current = completed; }, [completed]);
+    useEffect(() => { starsEarnedRef.current = starsEarned; }, [starsEarned]);
+
+    const drawnPointsRef = useRef<Array<{ x: number; y: number }>>([]);
+    const onPathCountRef = useRef(0);
+    const totalPointsRef = useRef(0);
+    const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const demoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    const trailColor = TRAIL_COLORS[(level.id - 1) % TRAIL_COLORS.length];
+
+    const guideSvgPath = buildSvgPath(level.guidePath, CANVAS_W, CANVAS_H, level.smooth);
+
+    // ── Demo Animation ────────────────────────────────────────────────────────
+
+    const runDemo = useCallback(() => {
+        setPhase('demo');
+        setMiloState('demo');
+        setSparkleVisible(true);
+        setDemoProgress(0);
+        drawnPathRef.current = '';
+        setDrawnPath('');
+        drawnPointsRef.current = [];
+
+        let step = 0;
+        const total = level.guidePath.length;
+
+        if (demoTimerRef.current) clearInterval(demoTimerRef.current);
+
+        demoTimerRef.current = setInterval(() => {
+            if (step >= total) {
+                if (demoTimerRef.current) clearInterval(demoTimerRef.current);
+                setSparkleVisible(false);
+                setMiloState('idle');
+
+                // Move to guided automatically after demo
+                setTimeout(() => {
+                    setPhase('guided');
+                    setShowGuide(true);
+                    setShowKeyDots(true);
+                }, 800);
+                return;
+            }
+
+            const pt = level.guidePath[step];
+            setSparklePos({ x: pt.x * CANVAS_W, y: pt.y * CANVAS_H });
+            setDemoProgress(step / (total - 1));
+
+            step++;
+        }, level.id === 9 ? 120 : 80);
+    }, [level]);
+
+    // Auto-play demo on mount
+    useEffect(() => {
+        const t = setTimeout(runDemo, 500);
+        return () => {
+            clearTimeout(t);
+            if (demoTimerRef.current) clearInterval(demoTimerRef.current);
+        };
+    }, [runDemo]);
+
+    // Idle nudge
+    useEffect(() => {
+        if (phase === 'demo' || completed) return;
+
+        const resetIdle = () => {
+            if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+            idleTimerRef.current = setTimeout(() => {
+                setMiloState('nudge');
+                setTimeout(() => setMiloState('idle'), 2000);
+            }, 5000);
+        };
+        resetIdle();
+        return () => { if (idleTimerRef.current) clearTimeout(idleTimerRef.current); };
+    }, [phase, isDrawing, completed]);
+
+    // ── Drawing Handler (reads refs, never stale) ─────────────────────────────
+
+    const panResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => true,
+            onMoveShouldSetPanResponder: () => true,
+            onPanResponderGrant: (evt) => {
+                if (phaseRef.current === 'demo' || completedRef.current) return;
+                const { locationX, locationY } = evt.nativeEvent;
+                drawnPointsRef.current = [{ x: locationX, y: locationY }];
+                drawnPathRef.current = `M ${locationX} ${locationY}`;
+                setDrawnPath(drawnPathRef.current);
+                onPathCountRef.current = 0;
+                totalPointsRef.current = 0;
+                setIsDrawing(true);
+                setMiloState('idle');
+            },
+            onPanResponderMove: (evt) => {
+                if (phaseRef.current === 'demo' || completedRef.current) return;
+                const { locationX, locationY } = evt.nativeEvent;
+                const clampedX = Math.max(0, Math.min(CANVAS_W, locationX));
+                const clampedY = Math.max(0, Math.min(CANVAS_H, locationY));
+                drawnPointsRef.current.push({ x: clampedX, y: clampedY });
+
+                // SAFETY: if path is empty/invalid, start with M instead of L
+                if (!drawnPathRef.current || !drawnPathRef.current.startsWith('M')) {
+                    drawnPathRef.current = `M ${clampedX} ${clampedY}`;
+                } else {
+                    drawnPathRef.current += ` L ${clampedX} ${clampedY}`;
+                }
+                setDrawnPath(drawnPathRef.current);
+
+                totalPointsRef.current++;
+
+                // Check distance to guide path
+                const d = nearestDistToPath(clampedX, clampedY, level.guidePath, CANVAS_W, CANVAS_H);
+                if (d <= level.tolerance) {
+                    onPathCountRef.current++;
+                    if (totalPointsRef.current % 10 === 0) {
+                        setMiloState('good');
+                    }
+                } else {
+                    if (totalPointsRef.current % 10 === 0) {
+                        setMiloState('offpath');
+                    }
+                }
+
+                // Guided phase: show sparkle ahead
+                if (phaseRef.current === 'guided') {
+                    const progress = Math.min(drawnPointsRef.current.length / (level.guidePath.length * 3), 1);
+                    const idx = Math.min(Math.floor(progress * level.guidePath.length) + 2, level.guidePath.length - 1);
+                    const gp = level.guidePath[idx];
+                    setSparklePos({ x: gp.x * CANVAS_W, y: gp.y * CANVAS_H });
+                    setSparkleVisible(true);
+                }
+            },
+            onPanResponderRelease: () => {
+                if (phaseRef.current === 'demo' || completedRef.current) return;
+                setIsDrawing(false);
+                setSparkleVisible(false);
+
+                const total = totalPointsRef.current;
+                const onPath = onPathCountRef.current;
+                const accuracy = total > 0 ? onPath / total : 0;
+
+                // Need minimum points drawn
+                if (total < 15) {
+                    setMiloState('nudge');
+                    return;
+                }
+
+                // Check coverage — did they trace far enough?
+                const lastDrawn = drawnPointsRef.current[drawnPointsRef.current.length - 1];
+                const lastGuide = level.guidePath[level.guidePath.length - 1];
+                const endDist = dist(lastDrawn, { x: lastGuide.x * CANVAS_W, y: lastGuide.y * CANVAS_H });
+
+                if (endDist > 80 && accuracy < 0.5) {
+                    setMiloState('nudge');
+                    return;
+                }
+
+                // SUCCESS!
+                setCompleted(true);
+
+                if (phaseRef.current === 'guided') {
+                    const newStars = accuracy >= 0.8 ? 2 : 1;
+                    setStarsEarned(newStars);
+                    onStarEarned(1);
+                    if (newStars >= 2) {
+                        setTimeout(() => onStarEarned(2), 600);
+                    }
+
+                    if (level.id === 9) {
+                        setMiloState('boss');
+                    } else {
+                        setMiloState('complete');
+                    }
+                    setShowConfetti(true);
+
+                    setTimeout(() => {
+                        setCompleted(false);
+                        setShowConfetti(false);
+                        drawnPathRef.current = '';
+                        setDrawnPath('');
+                        drawnPointsRef.current = [];
+                        setPhase('free');
+                        setShowGuide(false);
+                        setShowKeyDots(false);
+                        setMiloState('idle');
+                    }, 2500);
+                } else if (phaseRef.current === 'free') {
+                    setStarsEarned(3);
+                    onStarEarned(3);
+                    setMiloState(level.id === 9 ? 'boss' : 'complete');
+                    setShowConfetti(true);
+
+                    setTimeout(() => {
+                        onComplete(3);
+                    }, 2500);
+                }
+            },
+        })
+    ).current;
+
+    // ── Key Point Dots ────────────────────────────────────────────────────────
+
+    const keyDots = showKeyDots
+        ? level.keyPoints.map((idx, i) => {
+            const pt = level.guidePath[idx];
+            if (!pt) return null;
+            const isStart = i === 0;
+            return (
+                <View
+                    key={i}
+                    style={[
+                        s.keyDot,
+                        {
+                            left: pt.x * CANVAS_W - 16,
+                            top: pt.y * CANVAS_H - 16,
+                            backgroundColor: isStart ? '#4CD964' : PAL.white,
+                            borderColor: isStart ? '#2E7D32' : '#BDBDBD',
+                        },
+                    ]}
+                    pointerEvents="none"
+                >
+                    <Text style={[s.keyDotText, isStart && { color: PAL.white }]}>
+                        {isStart ? '▶' : i + 1}
+                    </Text>
+                </View>
+            );
+        })
+        : null;
+
+    return (
+        <View style={s.canvasOuter}>
+            {/* Canvas background */}
+            <View style={s.canvasBg}>
+                <Svg width={CANVAS_W} height={CANVAS_H} style={StyleSheet.absoluteFill}>
+                    <Rect x={0} y={0} width={CANVAS_W} height={CANVAS_H} rx={20} fill={PAL.canvas} />
+                </Svg>
+
+                {/* Guide path */}
+                {showGuide && (
+                    <Svg width={CANVAS_W} height={CANVAS_H} style={StyleSheet.absoluteFill} pointerEvents="none">
+                        <Path
+                            d={guideSvgPath}
+                            stroke={PAL.mint}
+                            strokeWidth={4}
+                            strokeDasharray="12,8"
+                            strokeLinecap="round"
+                            fill="none"
+                            opacity={0.7}
+                        />
+                    </Svg>
+                )}
+
+                {/* Drawn trail — only render valid SVG paths that start with M */}
+                {drawnPath !== '' && drawnPath.startsWith('M') && (
+                    <Svg width={CANVAS_W} height={CANVAS_H} style={StyleSheet.absoluteFill} pointerEvents="none">
+                        <G>
+                            {/* Outer glow */}
+                            <Path d={drawnPath} stroke={trailColor} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.25} />
+                            {/* Main trail */}
+                            <Path d={drawnPath} stroke={trailColor} strokeWidth={20} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                            {/* Inner highlight */}
+                            <Path d={drawnPath} stroke={PAL.white} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.5} />
+                        </G>
+                    </Svg>
+                )}
+
+                {/* Key point dots */}
+                {keyDots}
+
+                {/* Sparkle ball */}
+                <SparkleBall x={sparklePos.x} y={sparklePos.y} visible={sparkleVisible} />
+
+                {/* Draw area pan responder — touchAction: 'none' is critical for web */}
+                <View
+                    style={[StyleSheet.absoluteFill, { touchAction: 'none', userSelect: 'none', cursor: 'crosshair' } as any]}
+                    {...panResponder.panHandlers}
+                />
+            </View>
+
+            {/* Phase indicator */}
+            <View style={s.phaseBar}>
+                <Text style={s.phaseText}>
+                    {phase === 'demo' ? '👀 Watch Milo!' : phase === 'guided' ? '✏️ Trace the path!' : '🌟 Now from memory!'}
+                </Text>
+            </View>
+
+            {/* Milo */}
+            <MiloReactor state={miloState} />
+
+            {/* Controls */}
+            <View style={s.canvasControls}>
+                <TouchableOpacity style={s.controlBtn} onPress={runDemo} activeOpacity={0.7}>
+                    <Text style={{ fontSize: 22 }}>🔄</Text>
+                    <Text style={s.controlLabel}>Demo</Text>
+                </TouchableOpacity>
+
+                {completed && (
+                    <TouchableOpacity
+                        style={[s.controlBtn, s.controlBtnPrimary]}
+                        onPress={() => onComplete(starsEarned)}
+                        activeOpacity={0.7}
+                    >
+                        <Text style={{ fontSize: 22 }}>▶</Text>
+                        <Text style={[s.controlLabel, { color: PAL.textDark }]}>Next</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+
+            {/* Stars */}
+            <StarSlots earned={starsEarned} />
+
+            {/* Confetti */}
+            <MiniConfetti visible={showConfetti} />
+        </View>
+    );
+}
+
+// ── Summary Screen ────────────────────────────────────────────────────────────
+
+function SummaryScreen({
+    progress,
+    onReplay,
+}: {
+    progress: Record<number, LevelProgress>;
+    onReplay: (levelId: number) => void;
+}) {
+    const totalStars = Object.values(progress).reduce((a, b) => a + b.starsEarned, 0);
+    const needsPractice = LEVELS.filter(l => progress[l.id].offPathCount >= 3);
+
+    return (
+        <View style={s.summaryRoot}>
+            <LevelSelectBg />
+            <View style={s.summaryCard}>
+                <Text style={{ fontSize: 65 }}>🐵</Text>
+                <Text style={s.summaryTitle}>Stage 2 Complete!</Text>
+                <Text style={s.summarySubtitle}>Milo's Report Card</Text>
+
+                <View style={s.summaryStarRow}>
+                    <Text style={{ fontSize: 32, fontWeight: '900', color: PAL.textDark }}>{totalStars}</Text>
+                    <Text style={{ fontSize: 28 }}>⭐</Text>
+                </View>
+
+                <ScrollView style={{ maxHeight: 200 }}>
+                    {LEVELS.map(l => (
+                        <View key={l.id} style={s.summaryRow}>
+                            <Text style={{ fontSize: 18 }}>{l.emoji}</Text>
+                            <Text style={s.summaryRowName}>{l.name}</Text>
+                            <View style={{ flexDirection: 'row', gap: 2 }}>
+                                {Array.from({ length: 3 }, (_, i) => (
+                                    <Text key={i} style={{ fontSize: 14 }}>{i < progress[l.id].starsEarned ? '⭐' : '☆'}</Text>
+                                ))}
+                            </View>
+                            {progress[l.id].offPathCount >= 3 && (
+                                <TouchableOpacity onPress={() => onReplay(l.id)} style={s.replayBtn}>
+                                    <Text style={{ fontSize: 12 }}>🔄</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                    ))}
+                </ScrollView>
+
+                {needsPractice.length > 0 && (
+                    <View style={s.practiceCard}>
+                        <Text style={{ fontSize: 14, fontWeight: '800', color: '#F57F17' }}>
+                            ⭐ Practice more: {needsPractice.map(l => l.name).join(', ')}
+                        </Text>
+                    </View>
+                )}
+
+                <TouchableOpacity style={s.primaryBtn} onPress={() => router.push('/writing-stage3' as any)} activeOpacity={0.7}>
+                    <Text style={s.primaryBtnText}>Next Stage → 🔤</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => router.push('/writing' as any)} style={{ marginTop: 10 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: PAL.brown }}>Back to Levels</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
+
+export default function Stage2Strokes() {
+    const [screen, setScreen] = useState<'select' | 'play' | 'summary'>('select');
+    const [currentLevelId, setCurrentLevelId] = useState(1);
+    const [progress, setProgress] = useState<Record<number, LevelProgress>>(getInitialProgress);
+
+    // Determine highest unlocked level
+    const highestUnlocked = LEVELS.reduce((max, l) => {
+        if (l.id === 1) return Math.max(max, 1);
+        const prev = progress[l.id - 1];
+        if (prev && prev.completed) return Math.max(max, l.id);
+        return max;
+    }, 1);
+
+    // Count total completed for useWritingCompletion
+    const allComplete = LEVELS.every(l => progress[l.id].completed);
+    const totalStars = Object.values(progress).reduce((a, b) => a + b.starsEarned, 0);
+    useWritingCompletion(allComplete, 2, Math.min(3, Math.max(1, Math.floor(totalStars / 9))));
+
+    // ── Level Select ──────────────────────────────────────────────────────────
+
+    if (screen === 'select') {
+        return (
+            <View style={s.selectRoot}>
+                <LevelSelectBg />
+
+                {/* Header */}
+                <View style={s.selectHeader}>
+                    <TouchableOpacity onPress={() => router.push('/writing' as any)} style={{ padding: 8 }}>
+                        <Text style={{ fontSize: 24 }}>🏠</Text>
+                    </TouchableOpacity>
+                    <Text style={s.selectTitle}>Shape & Curve Practice</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={{ fontSize: 18 }}>{totalStars}</Text>
+                        <Text style={{ fontSize: 18 }}>⭐</Text>
+                    </View>
+                </View>
+
+                {/* Path of levels */}
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={s.pathScroll}
+                    style={s.pathContainer}
+                >
+                    {/* Section A label */}
+                    <View style={s.sectionLabel}>
+                        <Text style={s.sectionLabelText}>Curves</Text>
+                    </View>
+
+                    {LEVELS.filter(l => l.section === 'A').map(level => {
+                        const isCurrent = level.id === highestUnlocked && !progress[level.id].completed;
+                        return (
+                            <LevelBubble
+                                key={level.id}
+                                level={level}
+                                progress={progress[level.id]}
+                                isCurrent={isCurrent}
+                                onPress={() => {
+                                    const unlocked = progress[level.id].completed || level.id <= highestUnlocked;
+                                    if (unlocked) {
+                                        setCurrentLevelId(level.id);
+                                        setScreen('play');
+                                    }
+                                    // If locked, Milo shakes head — handled visually by bubble
+                                }}
+                            />
+                        );
+                    })}
+
+                    {/* Section B label */}
+                    <View style={s.sectionLabel}>
+                        <Text style={s.sectionLabelText}>Shapes</Text>
+                    </View>
+
+                    {LEVELS.filter(l => l.section === 'B').map(level => {
+                        const isCurrent = level.id === highestUnlocked && !progress[level.id].completed;
+                        return (
+                            <LevelBubble
+                                key={level.id}
+                                level={level}
+                                progress={progress[level.id]}
+                                isCurrent={isCurrent}
+                                onPress={() => {
+                                    const unlocked = progress[level.id].completed || level.id <= highestUnlocked;
+                                    if (unlocked) {
+                                        setCurrentLevelId(level.id);
+                                        setScreen('play');
+                                    }
+                                }}
+                            />
+                        );
+                    })}
+                </ScrollView>
+
+                {/* Friendly subtitle */}
+                <View style={s.selectFooter}>
+                    <Text style={s.selectFooterText}>🐵 Help Milo draw magical shapes!</Text>
+                </View>
+            </View>
+        );
+    }
+
+    // ── Level Play ────────────────────────────────────────────────────────────
+
+    if (screen === 'play') {
+        const level = LEVELS.find(l => l.id === currentLevelId)!;
+
+        return (
+            <View style={s.playRoot}>
+                <LevelSelectBg />
+
+                {/* Top bar */}
+                <View style={s.playHeader}>
+                    <TouchableOpacity onPress={() => setScreen('select')} style={{ padding: 8 }}>
+                        <Text style={{ fontSize: 22 }}>◀</Text>
+                    </TouchableOpacity>
+                    <Text style={s.playTitle}>{level.emoji} {level.name}</Text>
+                    <StarSlots earned={progress[level.id].starsEarned} />
+                </View>
+
+                {/* Canvas */}
+                <DrawingCanvas
+                    key={currentLevelId}
+                    level={level}
+                    onStarEarned={(starNum) => {
+                        setProgress(prev => ({
+                            ...prev,
+                            [level.id]: {
+                                ...prev[level.id],
+                                starsEarned: Math.max(prev[level.id].starsEarned, starNum),
+                            },
+                        }));
+                    }}
+                    onComplete={(stars) => {
+                        setProgress(prev => ({
+                            ...prev,
+                            [level.id]: {
+                                ...prev[level.id],
+                                starsEarned: Math.max(prev[level.id].starsEarned, stars),
+                                completed: true,
+                                attempts: prev[level.id].attempts + 1,
+                            },
+                        }));
+
+                        // Move to next level or summary
+                        setTimeout(() => {
+                            const nextLevel = LEVELS.find(l => l.id === level.id + 1);
+                            if (nextLevel) {
+                                setCurrentLevelId(nextLevel.id);
+                            } else {
+                                setScreen('summary');
+                            }
+                        }, 500);
+                    }}
+                />
+            </View>
+        );
+    }
+
+    // ── Summary ───────────────────────────────────────────────────────────────
+
+    return (
+        <SummaryScreen
+            progress={progress}
+            onReplay={(levelId) => {
+                setCurrentLevelId(levelId);
+                setScreen('play');
+            }}
         />
     );
 }
 
-function Scene2Foreground({ sceneIdx, progress, success }: { sceneIdx: number, progress: number, success: boolean }) {
-    // when success, opacity is fully 1.0. Otherwise keep it faintly visible (0.3).
-    const op = success ? 1 : Math.max(0.3, progress);
+// ── Styles ────────────────────────────────────────────────────────────────────
 
-    if (sceneIdx === 0) { // Tree
-        return (
-            <>
-                <Rect x={(W - 60) / 2} y={H * 0.2} width={60} height={H * 0.6} color={`rgba(139,69,19,${op})`} />
-                <Circle cx={W / 2} cy={H * 0.2} r={80} color={`rgba(76,175,80,${op})`} />
-            </>
-        );
-    }
-    if (sceneIdx === 1) { // Bridge
-        return (
-            <Rect x={W * 0.1} y={H * 0.48} width={W * 0.8} height={40} color={`rgba(139,69,19,${op})`} />
-        );
-    }
-    if (sceneIdx === 2) { // Rainbow
-        const path1 = Skia.Path.Make();
-        path1.moveTo(W * 0.1, H * 0.6);
-        path1.quadTo(W * 0.5, H * -0.2, W * 0.9, H * 0.6);
+const s = StyleSheet.create({
+    // Level Select
+    selectRoot: { flex: 1, backgroundColor: PAL.sky },
+    selectHeader: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingHorizontal: 16, paddingTop: 50, paddingBottom: 10, zIndex: 10,
+    },
+    selectTitle: { fontSize: 20, fontWeight: '900', color: PAL.textDark },
+    pathContainer: { flex: 1 },
+    pathScroll: {
+        flexDirection: 'row', alignItems: 'center',
+        paddingHorizontal: 20, paddingVertical: 20, gap: 16,
+    },
+    sectionLabel: {
+        backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 16,
+        paddingHorizontal: 14, paddingVertical: 6, marginRight: 8,
+    },
+    sectionLabelText: { fontSize: 14, fontWeight: '800', color: PAL.brown },
+    selectFooter: {
+        alignItems: 'center', paddingBottom: 40,
+    },
+    selectFooterText: { fontSize: 16, fontWeight: '700', color: PAL.textDark, opacity: 0.7 },
 
-        const path2 = Skia.Path.Make();
-        path2.moveTo(W * 0.15, H * 0.6);
-        path2.quadTo(W * 0.5, H * -0.1, W * 0.85, H * 0.6);
+    // Bubble
+    bubbleTouch: { alignItems: 'center', width: 80 },
+    bubbleOuter: {
+        width: 68, height: 68, borderRadius: 34,
+        backgroundColor: PAL.white, justifyContent: 'center', alignItems: 'center',
+        borderWidth: 3, borderColor: PAL.mint,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 4,
+    },
+    bubbleLocked: { borderColor: PAL.lockGray, opacity: 0.6 },
+    bubbleCurrent: { borderColor: PAL.sun, borderWidth: 4 },
+    bubbleInner: { justifyContent: 'center', alignItems: 'center' },
+    bubbleEmoji: { fontSize: 28 },
+    bubbleStars: { position: 'absolute', top: -10, flexDirection: 'row', gap: 1 },
+    lockOverlay: {
+        ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center',
+        backgroundColor: 'rgba(255,255,255,0.6)', borderRadius: 34,
+    },
+    bubbleLabel: { fontSize: 11, fontWeight: '800', color: PAL.textDark, textAlign: 'center', marginTop: 4 },
+    miloAtBubble: { fontSize: 24, position: 'absolute', bottom: -20 },
 
-        const path3 = Skia.Path.Make();
-        path3.moveTo(W * 0.2, H * 0.6);
-        path3.quadTo(W * 0.5, H * 0.0, W * 0.8, H * 0.6);
+    // Play screen
+    playRoot: { flex: 1, backgroundColor: PAL.sky },
+    playHeader: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingHorizontal: 16, paddingTop: 50, paddingBottom: 8, zIndex: 10,
+    },
+    playTitle: { fontSize: 22, fontWeight: '900', color: PAL.textDark },
 
-        return (
-            <>
-                <SkiaPath path={path1} color={`rgba(255,64,129,${op})`} style="stroke" strokeWidth={20} strokeCap="round" />
-                <SkiaPath path={path2} color={`rgba(255,152,0,${op})`} style="stroke" strokeWidth={20} strokeCap="round" />
-                <SkiaPath path={path3} color={`rgba(255,235,59,${op})`} style="stroke" strokeWidth={20} strokeCap="round" />
-            </>
-        );
-    }
-    if (sceneIdx === 3) { // River
-        const riverPath = Skia.Path.Make();
-        riverPath.moveTo(W * 0.5, H * 0.1);
-        riverPath.lineTo(W * 0.8, H * 0.3);
-        riverPath.lineTo(W * 0.2, H * 0.6);
-        riverPath.lineTo(W * 0.5, H * 0.9);
-        return <SkiaPath path={riverPath} color={`rgba(3,169,244,${op})`} style="stroke" strokeWidth={60} strokeCap="round" strokeJoin="round" />;
-    }
-    if (sceneIdx === 4) { // Mountain
-        const mountainPath = Skia.Path.Make();
-        mountainPath.moveTo(W * 0.2, H * 0.8);
-        mountainPath.lineTo(W * 0.5, H * 0.2);
-        mountainPath.lineTo(W * 0.8, H * 0.8);
-        return <SkiaPath path={mountainPath} color={`rgba(158,158,158,${op})`} style="stroke" strokeWidth={20} strokeCap="round" strokeJoin="round" />;
-    }
-    if (sceneIdx === 5) { // Moon
-        const moonPath = Skia.Path.Make();
-        moonPath.moveTo(W * 0.6, H * 0.2);
-        moonPath.quadTo(W * 0.1, H * 0.5, W * 0.6, H * 0.8);
-        moonPath.quadTo(W * 0.3, H * 0.5, W * 0.6, H * 0.2);
-        return <SkiaPath path={moonPath} color={`rgba(255,235,59,${op})`} style="fill" />;
-    }
+    // Canvas
+    canvasOuter: { flex: 1, paddingHorizontal: CANVAS_PAD, paddingTop: 8 },
+    canvasBg: {
+        width: CANVAS_W, height: CANVAS_H, borderRadius: 20,
+        backgroundColor: PAL.canvas, overflow: 'hidden',
+        shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 5,
+        touchAction: 'none' as any,
+    },
 
-    return null;
-}
+    // Key dots
+    keyDot: {
+        position: 'absolute', width: 32, height: 32, borderRadius: 16,
+        justifyContent: 'center', alignItems: 'center',
+        borderWidth: 2.5, zIndex: 10,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 3, elevation: 3,
+    },
+    keyDotText: { fontSize: 13, fontWeight: '900', color: PAL.textDark },
 
-export default function Stage2Strokes() {
-    const [currentScene, setCurrentScene] = useState(0);
-    const [showCompletion, setShowCompletion] = useState(false);
-    const [sceneAccuracies, setSceneAccuracies] = useState<number[]>([]);
+    // Sparkle ball
+    sparkleBall: {
+        position: 'absolute', width: 36, height: 36, justifyContent: 'center', alignItems: 'center', zIndex: 20,
+    },
 
-    const scene = STAGE2_SCENES[currentScene];
-    const expectedPath = expectedPathsData[scene.key as keyof typeof expectedPathsData] as Array<{ x: number, y: number }>;
+    // Phase bar
+    phaseBar: {
+        alignItems: 'center', paddingVertical: 8, marginTop: 6,
+    },
+    phaseText: {
+        fontSize: 16, fontWeight: '800', color: PAL.textDark,
+        backgroundColor: 'rgba(255,255,255,0.85)',
+        paddingHorizontal: 20, paddingVertical: 8, borderRadius: 20,
+        overflow: 'hidden',
+    },
 
-    const handleNextScene = (acc: number | null) => {
-        if (acc !== null) {
-            setSceneAccuracies(prev => [...prev, acc]);
-        }
-        if (currentScene < STAGE2_SCENES.length - 1) {
-            setCurrentScene(c => c + 1);
-        } else {
-            setShowCompletion(true);
-        }
-    };
+    // Milo
+    miloZone: {
+        position: 'absolute', bottom: 100, left: 16, alignItems: 'center', zIndex: 15,
+    },
+    miloBubble: {
+        backgroundColor: PAL.white, borderRadius: 16,
+        paddingHorizontal: 10, paddingVertical: 4, marginBottom: 4,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 3, elevation: 2,
+    },
 
-    if (showCompletion) {
-        return (
-            <GestureHandlerRootView style={styles.root}>
-                <SafeAreaView style={styles.safe}>
-                    <View style={styles.completeContainer}>
-                        <Text style={styles.completeEmoji}>🎊</Text>
-                        <Text style={styles.completeTitle}>Stage 2 Complete!</Text>
-                        <Text style={styles.completeSubtitle}>Milo's world is beautiful now!</Text>
+    // Controls
+    canvasControls: {
+        flexDirection: 'row', justifyContent: 'flex-end', gap: 12,
+        paddingTop: 8, paddingRight: 8,
+    },
+    controlBtn: {
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+        backgroundColor: 'rgba(255,255,255,0.85)', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3,
+    },
+    controlBtnPrimary: { backgroundColor: PAL.sun },
+    controlLabel: { fontSize: 13, fontWeight: '800', color: PAL.brown },
 
-                        {sceneAccuracies.length > 0 && (
-                            <View style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: 16, borderRadius: 16, marginBottom: 16 }}>
-                                <Text style={{ fontSize: 24, color: '#fff', fontWeight: 'bold' }}>
-                                    Average Score: {Math.round(sceneAccuracies.reduce((a, b) => a + b, 0) / sceneAccuracies.length)}%
-                                </Text>
-                            </View>
-                        )}
+    // Star slots
+    starSlots: {
+        flexDirection: 'row', justifyContent: 'center', gap: 4,
+    },
+    starSlot: { fontSize: 22, color: '#E0E0E0' },
+    starSlotEarned: { color: undefined },
 
-                        <TouchableOpacity style={styles.retryBtn} onPress={() => { setCurrentScene(0); setSceneAccuracies([]); setShowCompletion(false); }}>
-                            <Text style={styles.retryBtnText}>Play Again 🔁</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity style={[styles.retryBtn, { backgroundColor: '#4ECDC4', marginTop: 12 }]} onPress={() => router.push('/writing-stage3')}>
-                            <Text style={styles.retryBtnText}>Continue to Stage 3 ➡️</Text>
-                        </TouchableOpacity>
-                    </View>
-                </SafeAreaView>
-            </GestureHandlerRootView>
-        );
-    }
-
-    return (
-        <GestureHandlerRootView style={styles.root}>
-            <SafeAreaView style={styles.safe}>
-                <StrokeLesson
-                    key={scene.key}
-                    title={scene.title}
-                    hint={scene.hint}
-                    expectedPath={expectedPath}
-                    strokeType={scene.strokeType}
-                    miloStartNorm={scene.miloStartNorm}
-                    miloEndNorm={scene.miloEndNorm}
-                    strokeColor={scene.color}
-                    toleranceMultiplier={1.5} // Looser
-                    onNext={(acc) => handleNextScene(acc)}
-                >
-                    {({ drawnPoints, gameState, accuracy }) => {
-                        const progress = Math.min(drawnPoints.length / 25, 1);
-                        return (
-                            <>
-                                <BlueprintGuide sceneKey={scene.key} />
-                                <Scene2Foreground sceneIdx={currentScene} progress={progress} success={gameState === 'success'} />
-                            </>
-                        );
-                    }}
-                </StrokeLesson>
-            </SafeAreaView>
-        </GestureHandlerRootView>
-    );
-}
-
-const styles = StyleSheet.create({
-    root: { flex: 1, backgroundColor: '#1a1a2e' },
-    safe: { flex: 1 },
-    completeContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 14, padding: 32 },
-    completeEmoji: { fontSize: 80 },
-    completeTitle: { fontSize: 36, fontWeight: '900', color: '#FFE066', textAlign: 'center' },
-    completeSubtitle: { fontSize: 16, color: 'rgba(255,255,255,0.7)', textAlign: 'center', marginBottom: 8 },
-    retryBtn: { backgroundColor: '#FFE066', paddingHorizontal: 36, paddingVertical: 16, borderRadius: 50 },
-    retryBtnText: { fontSize: 18, fontWeight: '900', color: '#1a1a2e' }
+    // Summary
+    summaryRoot: { flex: 1, backgroundColor: PAL.sky },
+    summaryCard: {
+        flex: 1, justifyContent: 'center', alignItems: 'center',
+        paddingHorizontal: 28, paddingVertical: 40,
+    },
+    summaryTitle: { fontSize: 30, fontWeight: '900', color: PAL.textDark, textAlign: 'center', marginTop: 8 },
+    summarySubtitle: { fontSize: 16, fontWeight: '700', color: PAL.brown, textAlign: 'center', marginBottom: 12 },
+    summaryStarRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
+    summaryRow: {
+        flexDirection: 'row', alignItems: 'center', gap: 10,
+        backgroundColor: 'rgba(255,255,255,0.85)', paddingHorizontal: 16, paddingVertical: 10,
+        borderRadius: 14, marginBottom: 6, width: W * 0.8,
+    },
+    summaryRowName: { flex: 1, fontSize: 15, fontWeight: '800', color: PAL.textDark },
+    replayBtn: {
+        width: 32, height: 32, borderRadius: 16,
+        backgroundColor: PAL.coral, justifyContent: 'center', alignItems: 'center',
+    },
+    practiceCard: {
+        backgroundColor: 'rgba(255,215,0,0.2)', padding: 12, borderRadius: 14,
+        borderWidth: 2, borderColor: 'rgba(255,215,0,0.4)', marginVertical: 8,
+    },
+    primaryBtn: {
+        backgroundColor: PAL.sun, paddingHorizontal: 36, paddingVertical: 16, borderRadius: 50, marginTop: 12,
+        shadowColor: PAL.sun, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 12, elevation: 8,
+    },
+    primaryBtnText: { fontSize: 18, fontWeight: '900', color: PAL.textDark },
 });
