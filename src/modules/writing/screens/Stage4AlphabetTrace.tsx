@@ -1,7 +1,9 @@
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import AlphabetTracer from '../components/AlphabetTracer';
 import { practiceFlags } from './Stage3Recognition';
+import { useWritingCompletion } from './WritingLevelHub';
 
 const LETTERS = ['i', 't', 'u', 'w', 'e', 'l'];
 type SubPhase = '4A' | '4B' | '4C';
@@ -12,6 +14,9 @@ export default function Stage4AlphabetTrace() {
     const [phaseIdx, setPhaseIdx] = useState(0);
     const [showCompletion, setShowCompletion] = useState(false);
     const [totalMistakes, setTotalMistakes] = useState(0);
+
+    // Mark completion safely via hook
+    useWritingCompletion(showCompletion, 4, 3);
 
     const currentLetter = LETTERS[letterIdx];
     const currentPhase = PHASES[phaseIdx];
@@ -65,8 +70,13 @@ export default function Stage4AlphabetTrace() {
             <SafeAreaView style={styles.safe}>
                 <View style={styles.completeContainer}>
                     <Text style={styles.completeEmoji}>🎊</Text>
-                    <Text style={styles.completeTitle}>Stage 4 Complete!</Text>
-                    <Text style={styles.completeSubtitle}>Milo mastered cursive handwriting! ✍️</Text>
+                    <Text style={styles.completeTitle}>Level 4 Complete!</Text>
+                    <Text style={styles.completeSubtitle}>Milo mastered cursive handwriting! ✍️{'\n'}You finished ALL levels! 🏆</Text>
+                    <View style={{ flexDirection: 'row', gap: 6, marginVertical: 8 }}>
+                        <Text style={{ fontSize: 36 }}>⭐</Text>
+                        <Text style={{ fontSize: 36 }}>⭐</Text>
+                        <Text style={{ fontSize: 36 }}>⭐</Text>
+                    </View>
 
                     <View style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: 16, borderRadius: 16, marginBottom: 16 }}>
                         <Text style={{ fontSize: 24, color: '#fff', fontWeight: 'bold' }}>
@@ -74,8 +84,14 @@ export default function Stage4AlphabetTrace() {
                         </Text>
                     </View>
 
-                    <TouchableOpacity style={styles.retryBtn} onPress={() => { setLetterIdx(0); setPhaseIdx(0); setTotalMistakes(0); setShowCompletion(false); }}>
-                        <Text style={styles.retryBtnText}>Play Again 🔁</Text>
+                    {/* Primary: Back to levels (all done!) */}
+                    <TouchableOpacity style={[styles.retryBtn, { backgroundColor: '#4CD964' }]} onPress={() => router.push('/writing' as any)}>
+                        <Text style={styles.retryBtnText}>All Done! Back to Levels 🏆</Text>
+                    </TouchableOpacity>
+
+                    {/* Secondary: Play again */}
+                    <TouchableOpacity style={[styles.retryBtn, { backgroundColor: 'rgba(255,255,255,0.12)', marginTop: 12, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)' }]} onPress={() => { setLetterIdx(0); setPhaseIdx(0); setTotalMistakes(0); setShowCompletion(false); }}>
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: 'rgba(255,255,255,0.8)' }}>Play Again 🔁</Text>
                     </TouchableOpacity>
                 </View>
             </SafeAreaView>
