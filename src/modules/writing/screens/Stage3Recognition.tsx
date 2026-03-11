@@ -12,6 +12,7 @@
 import { router } from 'expo-router';
 import * as Speech from 'expo-speech';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import StoryIntro from './StoryIntro';
 import {
     Animated,
     Dimensions,
@@ -20,7 +21,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import Svg, { Circle, Ellipse, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, Ellipse, G, Path, Rect } from 'react-native-svg';
 import { useWritingCompletion } from './WritingLevelHub';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -561,7 +562,7 @@ function ProgressDots({ total, current, stars }: { total: number; current: numbe
 
 const TOTAL_ROUNDS = 5;
 
-export default function Stage3Recognition() {
+function Stage3Gameplay() {
     const [rounds] = useState(() => generateRounds());
     const [currentRound, setCurrentRound] = useState(0);
     const [showCompletion, setShowCompletion] = useState(false);
@@ -1211,3 +1212,237 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
 });
+
+// ── Stage 2 World Scenery (decorative shapes for Stage 3 intro) ───────────────
+
+export function Stage2WorldScenery() {
+    const [floatY] = useState(new Animated.Value(0));
+    const [spinVal] = useState(new Animated.Value(0));
+    const [pulseVal] = useState(new Animated.Value(1));
+
+    useEffect(() => {
+        // Float up/down
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(floatY, { toValue: -6, duration: 1200, useNativeDriver: true }),
+                Animated.timing(floatY, { toValue: 6, duration: 1200, useNativeDriver: true }),
+            ])
+        ).start();
+        // Slow rotation
+        Animated.loop(
+            Animated.timing(spinVal, { toValue: 1, duration: 8000, useNativeDriver: true })
+        ).start();
+        // Gentle pulse
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(pulseVal, { toValue: 1.08, duration: 1500, useNativeDriver: true }),
+                Animated.timing(pulseVal, { toValue: 0.92, duration: 1500, useNativeDriver: true }),
+            ])
+        ).start();
+    }, [floatY, spinVal, pulseVal]);
+
+    const spin = spinVal.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '360deg'],
+    });
+
+    return (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {/* ── Waterfall (left side) — inspired by Wave level ── */}
+            <Svg
+                width={W * 0.35} height={H * 0.38}
+                style={{ position: 'absolute', left: W * 0.0, top: H * 0.35 }}
+            >
+                {/* Rock cliff base layout */}
+                <Path d={`M 0 0 L ${W * 0.3} 0 L ${W * 0.24} ${H * 0.08} L ${W * 0.05} ${H * 0.06} Z`}
+                    fill="#A1887F" />
+                <Path d={`M ${W * 0.02} ${H * 0.04} L ${W * 0.28} ${H * 0.02} L ${W * 0.22} ${H * 0.09} L ${W * 0.03} ${H * 0.07} Z`}
+                    fill="#8D6E63" opacity={0.5} />
+                <Path d={`M ${W * 0.1} 0 L ${W * 0.15} ${H * 0.1} Z`} stroke="#795548" strokeWidth={4} opacity={0.3} />
+
+                {/* Massive Water sheet */}
+                <Path d={`M ${W * 0.04} ${H * 0.06} Q ${W * 0.08} ${H * 0.18} ${W * 0.05} ${H * 0.28} Q ${W * 0.04} ${H * 0.34} ${W * 0.06} ${H * 0.38} L ${W * 0.22} ${H * 0.38} Q ${W * 0.23} ${H * 0.26} ${W * 0.18} ${H * 0.16} Q ${W * 0.15} ${H * 0.09} ${W * 0.22} ${H * 0.06} Z`}
+                    fill="#4FC3F7" opacity={0.8} />
+                
+                {/* Water flow accent lines to show thickness */}
+                <Path d={`M ${W * 0.08} ${H * 0.06} Q ${W * 0.11} ${H * 0.16} ${W * 0.07} ${H * 0.26} Q ${W * 0.05} ${H * 0.32} ${W * 0.09} ${H * 0.38}`}
+                    stroke="#E1F5FE" strokeWidth={5} fill="none" strokeLinecap="round" opacity={0.7} />
+                <Path d={`M ${W * 0.15} ${H * 0.06} Q ${W * 0.17} ${H * 0.15} ${W * 0.13} ${H * 0.25} Q ${W * 0.11} ${H * 0.32} ${W * 0.16} ${H * 0.38}`}
+                    stroke="#81D4FA" strokeWidth={6} fill="none" strokeLinecap="round" opacity={0.6} />
+                <Path d={`M ${W * 0.19} ${H * 0.06} Q ${W * 0.21} ${H * 0.14} ${W * 0.18} ${H * 0.24} Q ${W * 0.16} ${H * 0.31} ${W * 0.2} ${H * 0.38}`}
+                    stroke="#B3E5FC" strokeWidth={4} fill="none" strokeLinecap="round" opacity={0.5} />
+                <Path d={`M ${W * 0.05} ${H * 0.08} Q ${W * 0.06} ${H * 0.18} ${W * 0.04} ${H * 0.28}`}
+                    stroke="#E1F5FE" strokeWidth={3} fill="none" strokeLinecap="round" opacity={0.4} />
+
+                {/* Mist / spray around the falls */}
+                <Path d={`M ${W * 0.22} ${H * 0.08} Q ${W * 0.25} ${H * 0.18} ${W * 0.21} ${H * 0.28} Q ${W * 0.23} ${H * 0.34} ${W * 0.25} ${H * 0.38}`}
+                    stroke="#BBDEFB" strokeWidth={6} fill="none" strokeLinecap="round" opacity={0.3} />
+                <Path d={`M ${W * 0.02} ${H * 0.15} Q ${W * 0.04} ${H * 0.25} ${W * 0.02} ${H * 0.38}`}
+                    stroke="#B3E5FC" strokeWidth={8} fill="none" strokeLinecap="round" opacity={0.2} />
+
+                {/* Splash pool at bottom */}
+                <Ellipse cx={W * 0.13} cy={H * 0.375} rx={W * 0.12} ry={12} fill="#B3E5FC" opacity={0.5} />
+                <Circle cx={W * 0.08} cy={H * 0.37} r={8} fill="#E1F5FE" opacity={0.6} />
+                <Circle cx={W * 0.18} cy={H * 0.37} r={6} fill="#E1F5FE" opacity={0.5} />
+                <Circle cx={W * 0.13} cy={H * 0.38} r={9} fill="#BBDEFB" opacity={0.4} />
+                <Circle cx={W * 0.22} cy={H * 0.365} r={5} fill="#E1F5FE" opacity={0.4} />
+
+                {/* FISH 1: Jumping out of the splash pool */}
+                <G transform={`translate(${W * 0.2}, ${H * 0.34}) rotate(-30)`}>
+                    {/* Tail */}
+                    <Path d="M -10 -5 L -2 -2 L -10 3 Z" fill="#FF9800" />
+                    {/* Body */}
+                    <Ellipse cx="4" cy="-1" rx="8" ry="4" fill="#FFB74D" />
+                    {/* Eye */}
+                    <Circle cx="8" cy="-2" r="1.5" fill="#FFFFFF" />
+                    <Circle cx="8.5" cy="-2" r="0.8" fill="#000000" />
+                    {/* Splash */}
+                    <Circle cx="-8" cy="10" r="2" fill="#FFFFFF" opacity={0.8} />
+                    <Circle cx="-4" cy="12" r="1.5" fill="#FFFFFF" opacity={0.6} />
+                </G>
+
+                {/* FISH 2: Falling back into the pool */}
+                <G transform={`translate(${W * 0.06}, ${H * 0.35}) rotate(45)`}>
+                    {/* Tail */}
+                    <Path d="M -8 -4 L -2 -1 L -8 2 Z" fill="#F57C00" />
+                    {/* Body */}
+                    <Ellipse cx="3" cy="-1" rx="6" ry="3" fill="#FF9800" />
+                    {/* Eye */}
+                    <Circle cx="6" cy="-2" r="1" fill="#FFFFFF" />
+                    <Circle cx="6.5" cy="-2" r="0.6" fill="#000000" />
+                    {/* Splash drops */}
+                    <Circle cx="10" cy="8" r="1.5" fill="#FFFFFF" opacity={0.7} />
+                </G>
+            </Svg>
+
+            {/* ── Spiral decoration (right hill) — from Spiral level ── */}
+            <Animated.View style={{
+                position: 'absolute', right: W * 0.03, top: H * 0.42,
+                transform: [{ rotate: spin }],
+            }}>
+                <Svg width={72} height={72}>
+                    <Path
+                        d="M 36 6 A 30 30 0 0 1 36 66 A 22 22 0 0 0 36 20 A 14 14 0 0 1 36 52 A 7 7 0 0 0 36 36"
+                        stroke="#FF7F6E" strokeWidth={4} fill="none" strokeLinecap="round" opacity={0.8}
+                    />
+                </Svg>
+            </Animated.View>
+
+            {/* ── Golden star (sky area) — from Star level ── */}
+            <Animated.View style={{
+                position: 'absolute', left: W * 0.12, top: H * 0.12,
+                transform: [{ translateY: floatY }, { scale: pulseVal }],
+            }}>
+                <Svg width={52} height={52}>
+                    <Path
+                        d="M 26 2 L 32 19 L 50 19 L 35 30 L 41 48 L 26 37 L 11 48 L 17 30 L 2 19 L 20 19 Z"
+                        fill="#FFD700" opacity={0.9} stroke="#FFC107" strokeWidth={1.5}
+                    />
+                </Svg>
+            </Animated.View>
+
+            {/* ── Small star (upper right) ── */}
+            <Animated.View style={{
+                position: 'absolute', right: W * 0.1, top: H * 0.15,
+                transform: [{ translateY: Animated.multiply(floatY, -1) }],
+            }}>
+                <Svg width={34} height={34}>
+                    <Path
+                        d="M 17 1 L 22 12 L 33 12 L 24 20 L 27 32 L 17 24 L 7 32 L 10 20 L 1 12 L 12 12 Z"
+                        fill="#FFD700" opacity={0.65}
+                    />
+                </Svg>
+            </Animated.View>
+
+            {/* ── Circle structure (grass left) — from Circle/Oval levels ── */}
+            <Animated.View style={{
+                position: 'absolute', left: W * 0.2, top: H * 0.6,
+                transform: [{ scale: pulseVal }],
+            }}>
+                <Svg width={60} height={60}>
+                    <Circle cx={30} cy={30} r={26} stroke="#7EFFD4" strokeWidth={4} fill="none" opacity={0.75} />
+                    <Circle cx={30} cy={30} r={16} stroke="#98E8C1" strokeWidth={3} fill="none" opacity={0.55} />
+                    <Circle cx={30} cy={30} r={7} fill="#B2DFDB" opacity={0.85} />
+                </Svg>
+            </Animated.View>
+
+            {/* ── Oval pond (grass right) — from Oval level ── */}
+            <Svg
+                width={90} height={45}
+                style={{ position: 'absolute', right: W * 0.12, top: H * 0.68 }}
+            >
+                <Ellipse cx={45} cy={22} rx={42} ry={18} fill="#4FC3F7" opacity={0.35} />
+                <Ellipse cx={45} cy={22} rx={32} ry={13} fill="#29B6F6" opacity={0.3} />
+                <Ellipse cx={45} cy={22} rx={20} ry={7} fill="#81D4FA" opacity={0.4} />
+            </Svg>
+
+            {/* ── Wave river (bottom) — from Wave level ── */}
+            <Svg
+                width={W} height={30}
+                style={{ position: 'absolute', left: 0, top: H * 0.82 }}
+            >
+                <Path
+                    d={`M 0 15 Q ${W * 0.08} 5 ${W * 0.16} 15 Q ${W * 0.24} 25 ${W * 0.32} 15 Q ${W * 0.4} 5 ${W * 0.48} 15 Q ${W * 0.56} 25 ${W * 0.64} 15 Q ${W * 0.72} 5 ${W * 0.8} 15 Q ${W * 0.88} 25 ${W * 0.96} 15 L ${W} 15`}
+                    stroke="#64B5F6" strokeWidth={3.5} fill="none" strokeLinecap="round" opacity={0.45}
+                />
+                <Path
+                    d={`M 0 20 Q ${W * 0.1} 10 ${W * 0.2} 20 Q ${W * 0.3} 28 ${W * 0.4} 20 Q ${W * 0.5} 10 ${W * 0.6} 20 Q ${W * 0.7} 28 ${W * 0.8} 20 Q ${W * 0.9} 10 ${W} 20`}
+                    stroke="#90CAF9" strokeWidth={2.5} fill="none" strokeLinecap="round" opacity={0.3}
+                />
+            </Svg>
+
+            {/* ── Diamond crystal (mid-right grass) — from Diamond level ── */}
+            <Animated.View style={{
+                position: 'absolute', right: W * 0.04, top: H * 0.56,
+                transform: [{ translateY: floatY }],
+            }}>
+                <Svg width={42} height={52}>
+                    <Path
+                        d="M 21 2 L 40 22 L 21 50 L 2 22 Z"
+                        fill="#E1BEE7" opacity={0.75} stroke="#CE93D8" strokeWidth={2}
+                    />
+                    <Path d="M 21 2 L 21 50" stroke="#F3E5F5" strokeWidth={1.5} opacity={0.5} />
+                    <Path d="M 2 22 L 40 22" stroke="#F3E5F5" strokeWidth={1.5} opacity={0.5} />
+                </Svg>
+            </Animated.View>
+
+            {/* ── Loop / bridge arch (between trees) — from Loop level ── */}
+            <Svg
+                width={W * 0.36} height={65}
+                style={{ position: 'absolute', left: W * 0.32, top: H * 0.53 }}
+            >
+                <Path
+                    d={`M 0 58 Q ${W * 0.09} 5 ${W * 0.18} 58 Q ${W * 0.27} 5 ${W * 0.36} 58`}
+                    stroke="#8D6E63" strokeWidth={5} fill="none" opacity={0.4} strokeLinecap="round"
+                />
+            </Svg>
+        </View>
+    );
+}
+
+// ── Stage 3 Entry with Story Intro ────────────────────────────────────────────
+
+export default function Stage3Recognition() {
+    const [showIntro, setShowIntro] = useState(true);
+
+    if (showIntro) {
+        return (
+            <StoryIntro
+                stageNumber={3}
+                title="Guide Milo Home"
+                storyLines={[
+                    "Wow! My jungle looks amazing now! \u{1F308}",
+                    "But uh oh\u2026 I wandered too far and I can't find my way home.",
+                    "Can you help guide me through the jungle?",
+                ]}
+                goalMessage="Choose the right signs to help Milo reach home!"
+                buttonLabel="Help Milo Find the Way"
+                onStart={() => setShowIntro(false)}
+                backgroundExtra={<Stage2WorldScenery />}
+            />
+        );
+    }
+
+    return <Stage3Gameplay />;
+}
+

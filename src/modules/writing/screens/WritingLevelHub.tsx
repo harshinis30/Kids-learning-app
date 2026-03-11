@@ -29,6 +29,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 
 const { width: W, height: H } = Dimensions.get('window');
 
@@ -395,14 +396,16 @@ function LevelButton({
     );
 }
 
-// ── Path Connector between levels ────────────────────────────────────────────
+// ── Road Connector between levels ───────────────────────────────────────────
 
-function PathConnector({ fromIdx, toIdx, unlocked }: { fromIdx: number; toIdx: number; unlocked: boolean }) {
+function RoadConnector({ fromIdx, toIdx, unlocked }: { fromIdx: number; toIdx: number; unlocked: boolean }) {
+    // Level center positions: container left + half container width (W*0.175) for X
+    // container top + half button height (45px) for Y
     const positions = [
-        { x: W * 0.12 + 45, y: H * 0.58 + 45 },
-        { x: W * 0.52 + 45, y: H * 0.45 + 45 },
-        { x: W * 0.08 + 45, y: H * 0.30 + 45 },
-        { x: W * 0.50 + 45, y: H * 0.16 + 45 },
+        { x: W * 0.12 + W * 0.175, y: H * 0.58 + 45 },
+        { x: W * 0.52 + W * 0.175, y: H * 0.45 + 45 },
+        { x: W * 0.08 + W * 0.175, y: H * 0.30 + 45 },
+        { x: W * 0.50 + W * 0.175, y: H * 0.16 + 45 },
     ];
 
     const from = positions[fromIdx];
@@ -410,36 +413,69 @@ function PathConnector({ fromIdx, toIdx, unlocked }: { fromIdx: number; toIdx: n
 
     if (!from || !to) return null;
 
-    // Create dashed path dots between levels
-    const numDots = 6;
-    const dots = [];
-    for (let i = 0; i < numDots; i++) {
-        const t = (i + 1) / (numDots + 1);
-        // Add slight curve to the path
-        const midX = (from.x + to.x) / 2 + (fromIdx % 2 === 0 ? 30 : -30);
-        const midY = (from.y + to.y) / 2;
-        // Quadratic bezier approximation
-        const x = (1 - t) * (1 - t) * from.x + 2 * (1 - t) * t * midX + t * t * to.x;
-        const y = (1 - t) * (1 - t) * from.y + 2 * (1 - t) * t * midY + t * t * to.y;
-        dots.push({ x, y, key: `${fromIdx}-${toIdx}-${i}` });
-    }
+    // Quadratic bezier control point (slight curve for visual interest)
+    const curveOffset = fromIdx % 2 === 0 ? 40 : -40;
+    const cpX = (from.x + to.x) / 2 + curveOffset;
+    const cpY = (from.y + to.y) / 2;
+
+    const pathD = `M ${from.x} ${from.y} Q ${cpX} ${cpY} ${to.x} ${to.y}`;
+
+    const roadColor = unlocked ? '#C8A96E' : 'rgba(150,150,170,0.35)';
+    const lineColor = unlocked ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.2)';
+    const gradId = `road-grad-${fromIdx}-${toIdx}`;
 
     return (
-        <>
-            {dots.map((dot) => (
-                <View
-                    key={dot.key}
-                    style={[
-                        styles.pathDot,
-                        {
-                            left: dot.x - 5,
-                            top: dot.y - 5,
-                            backgroundColor: unlocked ? 'rgba(255,224,102,0.6)' : 'rgba(255,255,255,0.15)',
-                        },
-                    ]}
-                />
-            ))}
-        </>
+        // pointerEvents="none" so level icons remain fully tappable
+        <Svg
+            width={W}
+            height={H}
+            style={[StyleSheet.absoluteFill, { zIndex: 0 } as any]}
+            pointerEvents="none"
+        >
+            <Defs>
+                <LinearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
+                    <Stop offset="0" stopColor={unlocked ? '#B8860B' : '#555566'} stopOpacity="0.6" />
+                    <Stop offset="0.5" stopColor={unlocked ? '#D4A843' : '#6A6A7A'} stopOpacity="0.9" />
+                    <Stop offset="1" stopColor={unlocked ? '#B8860B' : '#555566'} stopOpacity="0.6" />
+                </LinearGradient>
+            </Defs>
+            {/* Road base — wide warm tan strip */}
+            <Path
+                d={pathD}
+                stroke={roadColor}
+                strokeWidth={20}
+                strokeLinecap="round"
+                fill="none"
+                opacity={unlocked ? 0.85 : 0.35}
+            />
+            {/* Road edge shadow — gives depth */}
+            <Path
+                d={pathD}
+                stroke="rgba(0,0,0,0.25)"
+                strokeWidth={24}
+                strokeLinecap="round"
+                fill="none"
+                opacity={0.4}
+            />
+            {/* Road surface (lighter centre) */}
+            <Path
+                d={pathD}
+                stroke={unlocked ? '#E8C97A' : 'rgba(180,180,200,0.4)'}
+                strokeWidth={12}
+                strokeLinecap="round"
+                fill="none"
+                opacity={unlocked ? 0.9 : 0.3}
+            />
+            {/* Dashed centre-line */}
+            <Path
+                d={pathD}
+                stroke={lineColor}
+                strokeWidth={3}
+                strokeLinecap="round"
+                strokeDasharray="10,14"
+                fill="none"
+            />
+        </Svg>
     );
 }
 
@@ -447,10 +483,10 @@ function PathConnector({ fromIdx, toIdx, unlocked }: { fromIdx: number; toIdx: n
 
 function MiloOnMap({ currentLevel }: { currentLevel: number }) {
     const positions = [
-        { x: W * 0.12 + 70, y: H * 0.58 - 10 },
-        { x: W * 0.52 + 70, y: H * 0.45 - 10 },
-        { x: W * 0.08 + 70, y: H * 0.30 - 10 },
-        { x: W * 0.50 + 70, y: H * 0.16 - 10 },
+        { x: W * 0.12 + W * 0.175 + 52, y: H * 0.58 - 10 },
+        { x: W * 0.52 + W * 0.175 + 52, y: H * 0.45 - 10 },
+        { x: W * 0.08 + W * 0.175 + 52, y: H * 0.30 - 10 },
+        { x: W * 0.50 + W * 0.175 + 52, y: H * 0.16 - 10 },
     ];
 
     const pos = positions[Math.min(currentLevel, positions.length - 1)];
@@ -621,12 +657,12 @@ export default function WritingLevelHub() {
 
                 {/* Map area */}
                 <View style={styles.mapArea}>
-                    {/* Path connectors between levels */}
-                    <PathConnector fromIdx={0} toIdx={1} unlocked={writingProgress.isUnlocked(2)} />
-                    <PathConnector fromIdx={1} toIdx={2} unlocked={writingProgress.isUnlocked(3)} />
-                    <PathConnector fromIdx={2} toIdx={3} unlocked={writingProgress.isUnlocked(4)} />
+                    {/* Road connectors — z-index 0 so they render beneath level nodes */}
+                    <RoadConnector fromIdx={0} toIdx={1} unlocked={writingProgress.isUnlocked(2)} />
+                    <RoadConnector fromIdx={1} toIdx={2} unlocked={writingProgress.isUnlocked(3)} />
+                    <RoadConnector fromIdx={2} toIdx={3} unlocked={writingProgress.isUnlocked(4)} />
 
-                    {/* Level buttons */}
+                    {/* Level buttons — zIndex 1 so they float above roads */}
                     {levels.map((level, i) => (
                         <LevelButton
                             key={level.id}
@@ -718,7 +754,7 @@ const styles = StyleSheet.create({
         position: 'relative',
     },
 
-    // Path dots
+    // Path dots — kept in case needed elsewhere but no longer rendered as road
     pathDot: {
         position: 'absolute',
         width: 10,
@@ -726,11 +762,12 @@ const styles = StyleSheet.create({
         borderRadius: 5,
     },
 
-    // Level container (positioned absolutely)
+    // Level container (positioned absolutely, above the road layer)
     levelContainer: {
         position: 'absolute',
         alignItems: 'center',
         width: W * 0.35,
+        zIndex: 1,
     },
 
     // Glow ring behind level button

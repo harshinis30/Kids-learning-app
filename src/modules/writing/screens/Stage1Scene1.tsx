@@ -8,6 +8,7 @@
 import { useAudioPlayer } from 'expo-audio';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import StoryIntro from './StoryIntro';
 import {
     Dimensions,
     Animated as RNAnimated,
@@ -401,7 +402,7 @@ function GuidePathLayer({ scene }: { scene: SceneConfig }) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function Stage1Scene1() {
+function Stage1Gameplay() {
     const [currentScene, setCurrentScene] = useState(0);
     const [gameState, setGameState] = useState<GameState>('idle');
     const [accuracy, setAccuracy] = useState<number | null>(null);
@@ -493,19 +494,9 @@ export default function Stage1Scene1() {
             drawnPointsRef.current.push({ x: e.x / W, y: e.y / H });
             setDrawnPathD(prev => `${prev} L ${e.x} ${e.y}`);
 
-            switch (scene.strokeType) {
-                case 'vertical':
-                    miloX.value = withSpring(scene.miloStartNorm.x * W - MILO_SIZE / 2, { damping: 20, stiffness: 200 });
-                    miloY.value = withSpring(e.y - MILO_SIZE / 2, { damping: 20, stiffness: 200 });
-                    break;
-                case 'horizontal':
-                    miloX.value = withSpring(e.x - MILO_SIZE / 2, { damping: 20, stiffness: 200 });
-                    miloY.value = withSpring(scene.miloStartNorm.y * H - MILO_SIZE / 2, { damping: 20, stiffness: 200 });
-                    break;
-                default:
-                    miloX.value = withSpring(e.x - MILO_SIZE / 2, { damping: 20, stiffness: 200 });
-                    miloY.value = withSpring(e.y - MILO_SIZE / 2, { damping: 20, stiffness: 200 });
-            }
+            // Milo always follows the cursor freely, regardless of stroke type
+            miloX.value = withSpring(e.x - MILO_SIZE / 2, { damping: 20, stiffness: 200 });
+            miloY.value = withSpring(e.y - MILO_SIZE / 2, { damping: 20, stiffness: 200 });
         })
         .onEnd(() => {
             const acc = computeAccuracy(drawnPointsRef.current, expectedPath, DIMS);
@@ -608,45 +599,60 @@ export default function Stage1Scene1() {
 
                 <GestureDetector gesture={panGesture}>
                     <View style={styles.canvasWrapper}>
-                        <View style={StyleSheet.absoluteFill}>
+                        {/* Layer 1: Scene background — no pointer events */}
+                        <View style={StyleSheet.absoluteFill} pointerEvents="none">
                             <SceneBackground sceneIdx={currentScene} />
-                            <GuidePathLayer scene={scene} />
-                            <AnimatedGuideLayer scene={scene} />
-
-                            {(gameState === 'drawing' || gameState === 'success' || gameState === 'fail') && (
-                                <Svg style={[StyleSheet.absoluteFill, { userSelect: 'none', touchAction: 'none' } as any]} pointerEvents="none">
-                                    <G>
-                                        <Path
-                                            d={drawnPathD}
-                                            stroke={strokeColor}
-                                            strokeWidth={32}
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            fill="none"
-                                            opacity={0.3}
-                                        />
-                                        <Path
-                                            d={drawnPathD}
-                                            stroke={strokeColor}
-                                            strokeWidth={16}
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            fill="none"
-                                        />
-                                        <Path
-                                            d={drawnPathD}
-                                            stroke="#FFF"
-                                            strokeWidth={6}
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            fill="none"
-                                            opacity={0.6}
-                                        />
-                                    </G>
-                                </Svg>
-                            )}
                         </View>
 
+                        {/* Layer 2: Guide path — no pointer events */}
+                        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                            <GuidePathLayer scene={scene} />
+                            <AnimatedGuideLayer scene={scene} />
+                        </View>
+
+                        {/* Layer 3: Crayon trail — above guides, below Milo, no pointer events */}
+                        {(gameState === 'drawing' || gameState === 'success' || gameState === 'fail') && (
+                            <Svg
+                                width="100%"
+                                height="100%"
+                                style={[StyleSheet.absoluteFill, { userSelect: 'none', touchAction: 'none' } as any]}
+                                pointerEvents="none"
+                            >
+                                <G>
+                                    {/* Wide glow halo */}
+                                    <Path
+                                        d={drawnPathD}
+                                        stroke={strokeColor}
+                                        strokeWidth={36}
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        fill="none"
+                                        opacity={0.55}
+                                    />
+                                    {/* Main crayon stroke */}
+                                    <Path
+                                        d={drawnPathD}
+                                        stroke={strokeColor}
+                                        strokeWidth={18}
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        fill="none"
+                                    />
+                                    {/* Inner white highlight — crayon texture */}
+                                    <Path
+                                        d={drawnPathD}
+                                        stroke="#FFF"
+                                        strokeWidth={5}
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        fill="none"
+                                        opacity={0.7}
+                                    />
+                                </G>
+                            </Svg>
+                        )}
+
+                        {/* Layer 4: Milo sprite */}
                         <Animated.View style={[styles.milo, miloStyle]} pointerEvents="none">
                             <RNAnimated.View style={{ transform: [{ translateY: bobAnim }] }}>
                                 <Text style={styles.miloEmoji}>🐒</Text>
@@ -829,3 +835,28 @@ const styles = StyleSheet.create({
     sceneList: { gap: 6, alignItems: 'flex-start' },
     sceneListItem: { fontSize: 15, color: '#4ECDC4', fontWeight: '700' },
 });
+
+// ── Stage 1 Entry with Story Intro ────────────────────────────────────────────
+
+export default function Stage1Scene1() {
+    const [showIntro, setShowIntro] = useState(true);
+
+    if (showIntro) {
+        return (
+            <StoryIntro
+                stageNumber={1}
+                title="Help Milo Move!"
+                storyLines={[
+                    "Hi friend! I'm Milo the monkey! 🐒",
+                    "I want to explore the jungle, but there are many tricky places ahead — tall trees, swinging vines, bridges, and hills.",
+                    "Can you draw the paths to help me move through the jungle?",
+                ]}
+                goalMessage="Draw the path and help Milo travel through the jungle!"
+                buttonLabel="Start Adventure"
+                onStart={() => setShowIntro(false)}
+            />
+        );
+    }
+
+    return <Stage1Gameplay />;
+}

@@ -10,6 +10,7 @@
 
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import StoryIntro from './StoryIntro';
 import {
     Animated,
     Dimensions,
@@ -362,19 +363,19 @@ function MiloReactor({ state }: { state: MiloState }) {
     );
 }
 
-// ── Sparkle Ball (Demo Guide) ─────────────────────────────────────────────────
+// ── Monkey Demo Guide ─────────────────────────────────────────────────────────
 
 function SparkleBall({ x, y, visible }: { x: number; y: number; visible: boolean }) {
-    const [pulseAnim] = useState(new Animated.Value(1));
+    const [bounceAnim] = useState(new Animated.Value(0));
 
     useEffect(() => {
         Animated.loop(
             Animated.sequence([
-                Animated.timing(pulseAnim, { toValue: 1.3, duration: 400, useNativeDriver: true }),
-                Animated.timing(pulseAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+                Animated.timing(bounceAnim, { toValue: -8, duration: 350, useNativeDriver: true }),
+                Animated.timing(bounceAnim, { toValue: 0, duration: 350, useNativeDriver: true }),
             ])
         ).start();
-    }, [pulseAnim]);
+    }, [bounceAnim]);
 
     if (!visible) return null;
 
@@ -383,14 +384,14 @@ function SparkleBall({ x, y, visible }: { x: number; y: number; visible: boolean
             style={[
                 s.sparkleBall,
                 {
-                    left: x - 18,
-                    top: y - 18,
-                    transform: [{ scale: pulseAnim }],
+                    left: x - 22,
+                    top: y - 22,
+                    transform: [{ translateY: bounceAnim }],
                 },
             ]}
             pointerEvents="none"
         >
-            <Text style={{ fontSize: 28 }}>✨</Text>
+            <Text style={{ fontSize: 36 }}>🐒</Text>
         </Animated.View>
     );
 }
@@ -512,13 +513,14 @@ function DrawingCanvas({
 
         if (demoTimerRef.current) clearInterval(demoTimerRef.current);
 
+        // Normalize speed: all shapes take ~2.5s regardless of point count
+        const intervalMs = Math.max(40, Math.round(2500 / total));
+
         demoTimerRef.current = setInterval(() => {
             if (step >= total) {
                 if (demoTimerRef.current) clearInterval(demoTimerRef.current);
                 setSparkleVisible(false);
                 setMiloState('idle');
-
-                // Move to guided automatically after demo
                 setTimeout(() => {
                     setPhase('guided');
                     setShowGuide(true);
@@ -526,13 +528,11 @@ function DrawingCanvas({
                 }, 800);
                 return;
             }
-
             const pt = level.guidePath[step];
             setSparklePos({ x: pt.x * CANVAS_W, y: pt.y * CANVAS_H });
             setDemoProgress(step / (total - 1));
-
             step++;
-        }, level.id === 9 ? 120 : 80);
+        }, intervalMs);
     }, [level]);
 
     // Auto-play demo on mount
@@ -547,7 +547,6 @@ function DrawingCanvas({
     // Idle nudge
     useEffect(() => {
         if (phase === 'demo' || completed) return;
-
         const resetIdle = () => {
             if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
             idleTimerRef.current = setTimeout(() => {
@@ -559,7 +558,38 @@ function DrawingCanvas({
         return () => { if (idleTimerRef.current) clearTimeout(idleTimerRef.current); };
     }, [phase, isDrawing, completed]);
 
-    // ── Drawing Handler (reads refs, never stale) ─────────────────────────────
+    // ── Checkpoint State ──────────────────────────────────────────────────────
+    // Build pixel-position list for each key waypoint.
+    // For closed shapes the last keyPoint == first keyPoint visually — skip it.
+    const effectiveCheckpoints = React.useMemo(() => {
+        const pts = level.keyPoints.map(idx => ({
+            x: level.guidePath[idx].x * CANVAS_W,
+            y: level.guidePath[idx].y * CANVAS_H,
+        }));
+        // Only skip the last checkpoint when it's physically the same position as the first
+        // (Square/Triangle/Diamond/Star close back to start, but Loop/Circle/Oval don't)
+        if (level.closed && pts.length > 1) {
+            const first = pts[0];
+            const last = pts[pts.length - 1];
+            const d = Math.sqrt((first.x - last.x) ** 2 + (first.y - last.y) ** 2);
+            if (d < 8) pts.pop(); // positions are identical — drop duplicate
+        }
+        return pts;
+    }, [level]);
+
+    const [nextCpIdx, setNextCpIdx] = useState(0);
+    const [reachedCps, setReachedCps] = useState<Set<number>>(new Set());
+    const nextCpIdxRef = useRef(0);
+    const reachedCpsRef = useRef<Set<number>>(new Set());
+
+    useEffect(() => {
+        setNextCpIdx(0);
+        setReachedCps(new Set());
+        nextCpIdxRef.current = 0;
+        reachedCpsRef.current = new Set();
+    }, [level.id]);
+
+    // ── Drawing Handler (checkpoint-based) ───────────────────────────────────
 
     const panResponder = useRef(
         PanResponder.create({
@@ -575,6 +605,11 @@ function DrawingCanvas({
                 totalPointsRef.current = 0;
                 setIsDrawing(true);
                 setMiloState('idle');
+                // Reset checkpoint tracking each new stroke
+                nextCpIdxRef.current = 0;
+                reachedCpsRef.current = new Set();
+                setNextCpIdx(0);
+                setReachedCps(new Set());
             },
             onPanResponderMove: (evt) => {
                 if (phaseRef.current === 'demo' || completedRef.current) return;
@@ -582,37 +617,35 @@ function DrawingCanvas({
                 const clampedX = Math.max(0, Math.min(CANVAS_W, locationX));
                 const clampedY = Math.max(0, Math.min(CANVAS_H, locationY));
                 drawnPointsRef.current.push({ x: clampedX, y: clampedY });
-
-                // SAFETY: if path is empty/invalid, start with M instead of L
                 if (!drawnPathRef.current || !drawnPathRef.current.startsWith('M')) {
                     drawnPathRef.current = `M ${clampedX} ${clampedY}`;
                 } else {
                     drawnPathRef.current += ` L ${clampedX} ${clampedY}`;
                 }
                 setDrawnPath(drawnPathRef.current);
-
                 totalPointsRef.current++;
 
-                // Check distance to guide path
-                const d = nearestDistToPath(clampedX, clampedY, level.guidePath, CANVAS_W, CANVAS_H);
-                if (d <= level.tolerance) {
-                    onPathCountRef.current++;
-                    if (totalPointsRef.current % 10 === 0) {
-                        setMiloState('good');
+                // Sequential checkpoint detection
+                const curCp = nextCpIdxRef.current;
+                if (curCp < effectiveCheckpoints.length) {
+                    const cp = effectiveCheckpoints[curCp];
+                    const d = dist({ x: clampedX, y: clampedY }, cp);
+                    if (d <= level.tolerance * 1.4) {
+                        const newReached = new Set(reachedCpsRef.current);
+                        newReached.add(curCp);
+                        reachedCpsRef.current = newReached;
+                        setReachedCps(new Set(newReached));
+                        const newCp = curCp + 1;
+                        nextCpIdxRef.current = newCp;
+                        setNextCpIdx(newCp);
+                        setMiloState('segment');
+                        // Guide monkey to next checkpoint
+                        if (newCp < effectiveCheckpoints.length && phaseRef.current === 'guided') {
+                            const next = effectiveCheckpoints[newCp];
+                            setSparklePos({ x: next.x, y: next.y });
+                            setSparkleVisible(true);
+                        }
                     }
-                } else {
-                    if (totalPointsRef.current % 10 === 0) {
-                        setMiloState('offpath');
-                    }
-                }
-
-                // Guided phase: show sparkle ahead
-                if (phaseRef.current === 'guided') {
-                    const progress = Math.min(drawnPointsRef.current.length / (level.guidePath.length * 3), 1);
-                    const idx = Math.min(Math.floor(progress * level.guidePath.length) + 2, level.guidePath.length - 1);
-                    const gp = level.guidePath[idx];
-                    setSparklePos({ x: gp.x * CANVAS_W, y: gp.y * CANVAS_H });
-                    setSparkleVisible(true);
                 }
             },
             onPanResponderRelease: () => {
@@ -620,97 +653,65 @@ function DrawingCanvas({
                 setIsDrawing(false);
                 setSparkleVisible(false);
 
-                const total = totalPointsRef.current;
-                const onPath = onPathCountRef.current;
-                const accuracy = total > 0 ? onPath / total : 0;
+                const totalCps = effectiveCheckpoints.length;
+                const reached = reachedCpsRef.current.size;
 
-                // Need minimum points drawn
-                if (total < 15) {
-                    setMiloState('nudge');
-                    return;
-                }
+                if (reached === 0) { setMiloState('nudge'); return; }
+                if (reached < totalCps) { setMiloState('nudge'); return; }
 
-                // Check coverage — did they trace far enough?
-                const lastDrawn = drawnPointsRef.current[drawnPointsRef.current.length - 1];
-                const lastGuide = level.guidePath[level.guidePath.length - 1];
-                const endDist = dist(lastDrawn, { x: lastGuide.x * CANVAS_W, y: lastGuide.y * CANVAS_H });
-
-                if (endDist > 80 && accuracy < 0.5) {
-                    setMiloState('nudge');
-                    return;
-                }
-
-                // SUCCESS!
+                // All checkpoints reached — success!
                 setCompleted(true);
 
                 if (phaseRef.current === 'guided') {
-                    const newStars = accuracy >= 0.8 ? 2 : 1;
-                    setStarsEarned(newStars);
-                    onStarEarned(1);
-                    if (newStars >= 2) {
-                        setTimeout(() => onStarEarned(2), 600);
-                    }
-
-                    if (level.id === 9) {
-                        setMiloState('boss');
-                    } else {
-                        setMiloState('complete');
-                    }
-                    setShowConfetti(true);
-
-                    setTimeout(() => {
-                        setCompleted(false);
-                        setShowConfetti(false);
-                        drawnPathRef.current = '';
-                        setDrawnPath('');
-                        drawnPointsRef.current = [];
-                        setPhase('free');
-                        setShowGuide(false);
-                        setShowKeyDots(false);
-                        setMiloState('idle');
-                    }, 2500);
-                } else if (phaseRef.current === 'free') {
+                    // 3 stars — complete immediately, no free-draw phase
                     setStarsEarned(3);
-                    onStarEarned(3);
+                    onStarEarned(1);
+                    setTimeout(() => onStarEarned(2), 400);
+                    setTimeout(() => onStarEarned(3), 800);
                     setMiloState(level.id === 9 ? 'boss' : 'complete');
                     setShowConfetti(true);
-
-                    setTimeout(() => {
-                        onComplete(3);
-                    }, 2500);
+                    setTimeout(() => { onComplete(3); }, 2500);
                 }
             },
         })
     ).current;
 
-    // ── Key Point Dots ────────────────────────────────────────────────────────
+    // ── Key Point Dots (checkpoint indicators) ────────────────────────────────
 
     const keyDots = showKeyDots
-        ? level.keyPoints.map((idx, i) => {
-            const pt = level.guidePath[idx];
-            if (!pt) return null;
+        ? effectiveCheckpoints.map((cp, i) => {
             const isStart = i === 0;
+            const isReached = reachedCps.has(i);
+            const isNextTarget = i === nextCpIdx;
             return (
                 <View
                     key={i}
                     style={[
                         s.keyDot,
                         {
-                            left: pt.x * CANVAS_W - 16,
-                            top: pt.y * CANVAS_H - 16,
-                            backgroundColor: isStart ? '#4CD964' : PAL.white,
-                            borderColor: isStart ? '#2E7D32' : '#BDBDBD',
+                            left: cp.x - 16,
+                            top: cp.y - 16,
+                            backgroundColor: isReached ? '#4CD964'
+                                : isStart ? '#4CD964'
+                                : isNextTarget ? PAL.sun
+                                : PAL.white,
+                            borderColor: isReached ? '#2E7D32'
+                                : isStart ? '#2E7D32'
+                                : isNextTarget ? '#B8860B'
+                                : '#BDBDBD',
+                            borderWidth: isNextTarget ? 3.5 : 2.5,
                         },
                     ]}
                     pointerEvents="none"
                 >
-                    <Text style={[s.keyDotText, isStart && { color: PAL.white }]}>
-                        {isStart ? '▶' : i + 1}
+                    <Text style={[s.keyDotText, (isStart || isReached) && { color: PAL.white }]}>
+                        {isReached ? '✓' : isStart ? '▶' : i + 1}
                     </Text>
                 </View>
             );
         })
         : null;
+
 
     return (
         <View style={s.canvasOuter}>
@@ -805,9 +806,11 @@ function DrawingCanvas({
 function SummaryScreen({
     progress,
     onReplay,
+    onPlayAgain,
 }: {
     progress: Record<number, LevelProgress>;
     onReplay: (levelId: number) => void;
+    onPlayAgain: () => void;
 }) {
     const totalStars = Object.values(progress).reduce((a, b) => a + b.starsEarned, 0);
     const needsPractice = LEVELS.filter(l => progress[l.id].offPathCount >= 3);
@@ -855,6 +858,13 @@ function SummaryScreen({
                 <TouchableOpacity style={s.primaryBtn} onPress={() => router.push('/writing-stage3' as any)} activeOpacity={0.7}>
                     <Text style={s.primaryBtnText}>Next Stage → 🔤</Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                    style={s.playAgainBtn}
+                    onPress={onPlayAgain}
+                    activeOpacity={0.7}
+                >
+                    <Text style={s.playAgainBtnText}>Play Again 🔁</Text>
+                </TouchableOpacity>
                 <TouchableOpacity onPress={() => router.push('/writing' as any)} style={{ marginTop: 10 }}>
                     <Text style={{ fontSize: 14, fontWeight: '700', color: PAL.brown }}>Back to Levels</Text>
                 </TouchableOpacity>
@@ -865,7 +875,7 @@ function SummaryScreen({
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
-export default function Stage2Strokes() {
+function Stage2Gameplay() {
     const [screen, setScreen] = useState<'select' | 'play' | 'summary'>('select');
     const [currentLevelId, setCurrentLevelId] = useState(1);
     const [progress, setProgress] = useState<Record<number, LevelProgress>>(getInitialProgress);
@@ -1033,6 +1043,11 @@ export default function Stage2Strokes() {
                 setCurrentLevelId(levelId);
                 setScreen('play');
             }}
+            onPlayAgain={() => {
+                setProgress(getInitialProgress());
+                setCurrentLevelId(1);
+                setScreen('select');
+            }}
         />
     );
 }
@@ -1182,4 +1197,42 @@ const s = StyleSheet.create({
         shadowColor: PAL.sun, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 12, elevation: 8,
     },
     primaryBtnText: { fontSize: 18, fontWeight: '900', color: PAL.textDark },
+    playAgainBtn: {
+        backgroundColor: PAL.coral,
+        paddingHorizontal: 32,
+        paddingVertical: 14,
+        borderRadius: 50,
+        marginTop: 10,
+        shadowColor: PAL.coral,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 10,
+        elevation: 6,
+    },
+    playAgainBtnText: { fontSize: 16, fontWeight: '900', color: PAL.white },
 });
+
+// ── Stage 2 Entry with Story Intro ────────────────────────────────────────────
+
+export default function Stage2Strokes() {
+    const [showIntro, setShowIntro] = useState(true);
+
+    if (showIntro) {
+        return (
+            <StoryIntro
+                stageNumber={2}
+                title="Build Milo's World"
+                storyLines={[
+                    "Wow! We made it through the jungle! \u{1F333}",
+                    "But my world looks empty\u2026 there are no trees, bridges, or rivers yet.",
+                    "Can you help me build my world?",
+                ]}
+                goalMessage="Draw the shapes to build Milo's world!"
+                buttonLabel="Let's Build Milo's World"
+                onStart={() => setShowIntro(false)}
+            />
+        );
+    }
+
+    return <Stage2Gameplay />;
+}
