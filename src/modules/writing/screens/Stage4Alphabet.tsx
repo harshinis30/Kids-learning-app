@@ -624,7 +624,8 @@ function DrawingCanvas({
                 const acc = computeAccuracy(
                     normalizedDrawn,
                     level.guidePath,
-                    { width: LETTER_SIZE, height: LETTER_SIZE }
+                    { width: LETTER_SIZE, height: LETTER_SIZE },
+                    { toleranceMultiplier: 1.5 }
                 );
                 const fb = getFeedback(acc);
                 const passes = canProgress(acc);
