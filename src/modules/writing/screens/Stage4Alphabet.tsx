@@ -21,6 +21,8 @@ import {
     View,
 } from 'react-native';
 import Svg, { Circle, Ellipse, G, Path, Rect } from 'react-native-svg';
+import { computeAccuracy } from '../utils/accuracy.js';
+import { canProgress, getFeedback } from '../utils/scoring.js';
 import { useWritingCompletion } from './WritingLevelHub';
 
 // ── Constants (same as Stage 2) ───────────────────────────────────────────────
@@ -442,6 +444,8 @@ function DrawingCanvas({
     const [showKeyDots, setShowKeyDots] = useState(true);
     const [isDrawing, setIsDrawing] = useState(false);
     const [completed, setCompleted] = useState(false);
+    const [accuracy, setAccuracy] = useState<number | null>(null);
+    const [feedback, setFeedback] = useState<{ message: string; emoji: string } | null>(null);
 
     // Refs for PanResponder (critical — same pattern as Stage 2)
     const phaseRef = useRef(phase);
@@ -611,12 +615,35 @@ function DrawingCanvas({
                 if (reached === 0) { setMiloState('nudge'); return; }
                 if (reached < totalCps) { setMiloState('nudge'); return; }
 
-                // All checkpoints reached — 3 stars
-                setCompleted(true);
-                setStarsEarned(3);
-                setMiloState('complete');
-                setShowConfetti(true);
-                setTimeout(() => { onComplete(3); }, 2500);
+                // All checkpoints reached — now compute PATH-BASED accuracy
+                // Reverse the letter-box mapping to normalize drawn points to 0–1
+                const normalizedDrawn = drawnPointsRef.current.map(pt => ({
+                    x: (pt.x - LETTER_OX) / LETTER_SIZE,
+                    y: (pt.y - LETTER_OY) / LETTER_SIZE,
+                }));
+                const acc = computeAccuracy(
+                    normalizedDrawn,
+                    level.guidePath,
+                    { width: LETTER_SIZE, height: LETTER_SIZE }
+                );
+                const fb = getFeedback(acc);
+                const passes = canProgress(acc);
+
+                setAccuracy(acc);
+                setFeedback(fb);
+
+                if (passes) {
+                    // Award stars based on accuracy
+                    const earnedStars = acc >= 90 ? 3 : acc >= 70 ? 2 : 1;
+                    setCompleted(true);
+                    setStarsEarned(earnedStars);
+                    setMiloState('complete');
+                    setShowConfetti(true);
+                    setTimeout(() => { onComplete(earnedStars); }, 2500);
+                } else {
+                    // Accuracy too low — show fail overlay, allow retry
+                    setMiloState('offpath');
+                }
             },
         })
     ).current;
@@ -754,6 +781,48 @@ function DrawingCanvas({
 
             {/* Confetti */}
             <MiniConfetti visible={showConfetti} />
+
+            {/* Accuracy overlay — success */}
+            {completed && accuracy !== null && feedback && (
+                <View style={s.accuracyOverlay}>
+                    <Text style={{ fontSize: 72 }}>{feedback.emoji}</Text>
+                    <Text style={s.accuracyOverlayTitle}>{feedback.message}</Text>
+                    <View style={[s.accuracyBadge, { borderColor: '#4CD964' }]}>
+                        <Text style={s.accuracyBadgeText}>Accuracy: {accuracy}%</Text>
+                    </View>
+                </View>
+            )}
+
+            {/* Accuracy overlay — fail (< 60%) */}
+            {!completed && accuracy !== null && feedback && !isDrawing && (
+                <View style={s.accuracyOverlay}>
+                    <Text style={{ fontSize: 72 }}>{feedback.emoji}</Text>
+                    <Text style={s.accuracyOverlayTitle}>{feedback.message}</Text>
+                    <View style={[s.accuracyBadge, { borderColor: PAL.coral }]}>
+                        <Text style={s.accuracyBadgeText}>Accuracy: {accuracy}%</Text>
+                    </View>
+                    <Text style={{ fontSize: 13, color: PAL.brown, fontWeight: '700', marginTop: 4 }}>Need 70% to advance</Text>
+                    <TouchableOpacity
+                        style={[s.controlBtn, s.controlBtnPrimary, { marginTop: 12 }]}
+                        onPress={() => {
+                            drawnPointsRef.current = [];
+                            drawnPathRef.current = '';
+                            setDrawnPath('');
+                            setAccuracy(null);
+                            setFeedback(null);
+                            setMiloState('idle');
+                            nextCpIdxRef.current = 0;
+                            reachedCpsRef.current = new Set();
+                            setNextCpIdx(0);
+                            setReachedCps(new Set());
+                        }}
+                        activeOpacity={0.7}
+                    >
+                        <Text style={{ fontSize: 20 }}>🔁</Text>
+                        <Text style={[s.controlLabel, { color: PAL.textDark }]}>Try Again</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
         </View>
     );
 }
@@ -1069,6 +1138,28 @@ const s = StyleSheet.create({
     starSlots: { flexDirection: 'row', justifyContent: 'center', gap: 4 },
     starSlot: { fontSize: 22, color: '#E0E0E0' },
     starSlotEarned: { color: undefined },
+
+    // Accuracy overlay
+    accuracyOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(255,253,245,0.94)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 10,
+        paddingHorizontal: 24,
+        zIndex: 30,
+        borderRadius: 20,
+    },
+    accuracyOverlayTitle: {
+        fontSize: 22, fontWeight: '900', color: PAL.textDark, textAlign: 'center',
+    },
+    accuracyBadge: {
+        borderWidth: 2, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 30,
+        backgroundColor: 'rgba(255,255,255,0.8)',
+    },
+    accuracyBadgeText: {
+        fontSize: 20, fontWeight: '800', color: PAL.textDark,
+    },
 
     // Summary
     summaryRoot: { flex: 1, backgroundColor: PAL.sky },

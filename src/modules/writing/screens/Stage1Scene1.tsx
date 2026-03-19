@@ -700,7 +700,7 @@ function Stage1Gameplay() {
                                         <Text style={styles.accuracyText}>Accuracy: {accuracy}%</Text>
                                     </View>
                                 )}
-                                <Text style={styles.needScoreText}>Need 60% to advance</Text>
+                                <Text style={styles.needScoreText}>Need 70% to advance</Text>
                                 <TouchableOpacity style={styles.retryBtn} onPress={resetScene}>
                                     <Text style={styles.retryBtnText}>Try Again 🔁</Text>
                                 </TouchableOpacity>

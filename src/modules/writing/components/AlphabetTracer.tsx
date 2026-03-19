@@ -23,7 +23,7 @@ const LETTER_STROKES: Record<string, string[]> = {
 export interface AlphabetTracerProps {
     letterId: string;
     subPhase: '4A' | '4B' | '4C';
-    onLetterComplete: (mistakes: number) => void;
+    onLetterComplete: (mistakes: number, accuracy: number) => void;
     onStruggle: () => void;
 }
 
@@ -129,6 +129,7 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
     const [completedStrokes, setCompletedStrokes] = useState<any[]>([]);
     const [mistakeCount, setMistakeCount] = useState(0);
     const [localMistakes, setLocalMistakes] = useState(0);
+    const strokeAccuraciesRef = useRef<number[]>([]);
 
     const strokes = LETTER_STROKES[letterId] || [];
 
@@ -137,6 +138,7 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
         setCompletedStrokes([]);
         setMistakeCount(0);
         setLocalMistakes(0);
+        strokeAccuraciesRef.current = [];
     }, [letterId, subPhase]);
 
     if (strokeIdx >= strokes.length || strokes.length === 0) {
@@ -152,8 +154,11 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
             : (isCursiveStroke ? 1.2 : 0.6);
     const guideStyle = subPhase === '4A' ? 'full' : subPhase === '4B' ? 'partial' : 'none';
 
-    const handleStrokeSuccess = (drawn: Array<{ x: number, y: number }>) => {
+    const handleStrokeSuccess = (drawn: Array<{ x: number, y: number }>, strokeAccuracy: number) => {
         const pathD = getSvgPathFromPoints(drawn);
+
+        // Track accuracy for this stroke
+        strokeAccuraciesRef.current.push(strokeAccuracy);
 
         // Slight delay so child sees the success highlight before clearing/moving
         setTimeout(() => {
@@ -163,7 +168,11 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
                 setCompletedStrokes(newStrokes);
                 setStrokeIdx(s => s + 1);
             } else {
-                onLetterComplete(mistakeCount);
+                // Average accuracy across all strokes of this letter
+                const avgAccuracy = strokeAccuraciesRef.current.length > 0
+                    ? Math.round(strokeAccuraciesRef.current.reduce((a, b) => a + b, 0) / strokeAccuraciesRef.current.length)
+                    : 0;
+                onLetterComplete(mistakeCount, avgAccuracy);
             }
         }, 1000);
     };
@@ -181,8 +190,8 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
     };
 
     // Called when user taps "Next" on the success overlay inside StrokeLesson
-    const handleNext = (_acc: number | null) => {
-        handleStrokeSuccess([]); // trigger advance to next stroke
+    const handleNext = (acc: number | null) => {
+        handleStrokeSuccess([], acc ?? 0); // trigger advance to next stroke with accuracy
     };
 
     return (
@@ -215,7 +224,7 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
                                 key={activeStrokeKey + '_effect'}
                                 gameState={gameState}
                                 drawnPoints={drawnPoints}
-                                onStrokeSuccess={handleStrokeSuccess}
+                                onStrokeSuccess={(pts) => handleStrokeSuccess(pts, accuracy ?? 0)}
                             />
 
                             {/* Guides for all remaining strokes including current */}

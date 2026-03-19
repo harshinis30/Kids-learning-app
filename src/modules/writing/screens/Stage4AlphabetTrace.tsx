@@ -14,17 +14,23 @@ export default function Stage4AlphabetTrace() {
     const [phaseIdx, setPhaseIdx] = useState(0);
     const [showCompletion, setShowCompletion] = useState(false);
     const [totalMistakes, setTotalMistakes] = useState(0);
+    const [letterAccuracies, setLetterAccuracies] = useState<number[]>([]);
 
-    // Mark completion safely via hook
-    useWritingCompletion(showCompletion, 4, 3);
+    // Mark completion safely via hook — star count based on average accuracy
+    const avgAccuracy = letterAccuracies.length > 0
+        ? Math.round(letterAccuracies.reduce((a, b) => a + b, 0) / letterAccuracies.length)
+        : 0;
+    const finalStars = avgAccuracy >= 90 ? 3 : avgAccuracy >= 70 ? 2 : avgAccuracy >= 60 ? 1 : 1;
+    useWritingCompletion(showCompletion, 4, finalStars);
 
     const currentLetter = LETTERS[letterIdx];
     const currentPhase = PHASES[phaseIdx];
 
     const [practiceRep, setPracticeRep] = useState(0);
 
-    const handleLetterComplete = (mistakes: number) => {
+    const handleLetterComplete = (mistakes: number, accuracy: number) => {
         setTotalMistakes(m => m + mistakes);
+        setLetterAccuracies(prev => [...prev, accuracy]);
 
         // If they struggled inside word
         if (mistakes > 5) {
@@ -80,7 +86,7 @@ export default function Stage4AlphabetTrace() {
 
                     <View style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: 16, borderRadius: 16, marginBottom: 16 }}>
                         <Text style={{ fontSize: 24, color: '#fff', fontWeight: 'bold' }}>
-                            Overall Score: {Math.max(0, 100 - (totalMistakes * 5))}%
+                            Overall Accuracy: {avgAccuracy}%
                         </Text>
                     </View>
 
@@ -90,7 +96,7 @@ export default function Stage4AlphabetTrace() {
                     </TouchableOpacity>
 
                     {/* Secondary: Play again */}
-                    <TouchableOpacity style={[styles.retryBtn, { backgroundColor: 'rgba(255,255,255,0.12)', marginTop: 12, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)' }]} onPress={() => { setLetterIdx(0); setPhaseIdx(0); setTotalMistakes(0); setShowCompletion(false); }}>
+                    <TouchableOpacity style={[styles.retryBtn, { backgroundColor: 'rgba(255,255,255,0.12)', marginTop: 12, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)' }]} onPress={() => { setLetterIdx(0); setPhaseIdx(0); setTotalMistakes(0); setLetterAccuracies([]); setShowCompletion(false); }}>
                         <Text style={{ fontSize: 15, fontWeight: '700', color: 'rgba(255,255,255,0.8)' }}>Play Again 🔁</Text>
                     </TouchableOpacity>
                 </View>

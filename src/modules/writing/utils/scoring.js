@@ -34,7 +34,7 @@ export function getFeedback(accuracy) {
  * @returns {boolean}
  */
 export function canProgress(accuracy) {
-  return accuracy >= 60;
+  return accuracy >= 70;
 }
 
 /** Backward-compat threshold (normalized 0–1 equivalent of 60%) */

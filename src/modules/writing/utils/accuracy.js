@@ -79,20 +79,27 @@ function nearestDistance(sample, drawn, W, H) {
 }
 
 /**
- * Compute path-tracing accuracy as a 0–100 integer.
+ * Compute path-tracing accuracy as a 0–100 integer using
+ * BIDIRECTIONAL path matching.
  *
- * Algorithm:
- *  1. Sample the expected path into `SAMPLE_COUNT` evenly-spaced points.
- *  2. For each sample, find the nearest drawn point (pixel distance).
- *  3. Average those distances.
- *  4. Map: distance 0 → 100%, distance ≥ tolerance → 0%.
+ * Two scores are combined:
  *
- * Tolerance is generous (20% of screen diagonal) so young children
- * who are close but not perfect still score reasonably.
+ *  A) COVERAGE — "Did the user draw near every part of the expected path?"
+ *     Sample the expected path, find nearest drawn point for each sample.
+ *     Scribbles score well here (they cover everything).
+ *
+ *  B) PRECISION — "Did the user STAY on the expected path?"
+ *     Sample the drawn path, find nearest expected-path point for each sample.
+ *     Scribbles score BADLY here (most drawn points are far from the path).
+ *
+ * Final score = (coverageScore + precisionScore) / 2
+ *
+ * Tolerance is 6% of screen diagonal — tight enough that off-path
+ * drawing is penalized, but forgiving for young children's motor skills.
  *
  * @param {Array<{x: number, y: number}>} drawnPoints  - Normalized (0–1)
  * @param {Array<{x: number, y: number}>} expectedPath - Normalized (0–1) waypoints
- * @param {{ width: number, height: number }} dimensions - Screen pixel size
+ * @param {{ width: number, height: number }} dimensions - Pixel dimensions
  * @returns {number} Integer accuracy 0–100
  */
 export function computeAccuracy(drawnPoints, expectedPath, dimensions, options = { toleranceMultiplier: 1.0 }) {
@@ -100,18 +107,30 @@ export function computeAccuracy(drawnPoints, expectedPath, dimensions, options =
   if (!expectedPath || expectedPath.length < 2) return 0;
 
   const { width: W, height: H } = dimensions;
-  const SAMPLE_COUNT = 40;
-  const TOLERANCE_PX = Math.hypot(W, H) * 0.20 * (options.toleranceMultiplier || 1.0);
+  const SAMPLE_COUNT = 50;
+  const TOLERANCE_PX = Math.hypot(W, H) * 0.06 * (options.toleranceMultiplier || 1.0);
 
-  const samples = samplePath(expectedPath, SAMPLE_COUNT);
+  // Sample both paths into evenly-spaced points
+  const expectedSamples = samplePath(expectedPath, SAMPLE_COUNT);
+  const drawnSamples = samplePath(drawnPoints, SAMPLE_COUNT);
 
-  let totalDist = 0;
-  for (const sample of samples) {
-    totalDist += nearestDistance(sample, drawnPoints, W, H);
+  // A) COVERAGE: for each expected sample, nearest drawn point
+  let coverageDist = 0;
+  for (const sample of expectedSamples) {
+    coverageDist += nearestDistance(sample, drawnSamples, W, H);
   }
-  const avgDist = totalDist / samples.length;
+  const avgCoverage = coverageDist / expectedSamples.length;
+  const coverageScore = Math.max(0, 1 - avgCoverage / TOLERANCE_PX);
 
-  // Linear mapping: 0 px → 100%, TOLERANCE_PX → 0%
-  const rawScore = Math.max(0, 1 - avgDist / TOLERANCE_PX);
-  return Math.round(rawScore * 100);
+  // B) PRECISION: for each drawn sample, nearest expected-path point
+  let precisionDist = 0;
+  for (const sample of drawnSamples) {
+    precisionDist += nearestDistance(sample, expectedSamples, W, H);
+  }
+  const avgPrecision = precisionDist / drawnSamples.length;
+  const precisionScore = Math.max(0, 1 - avgPrecision / TOLERANCE_PX);
+
+  // Combine both scores equally
+  const finalScore = (coverageScore + precisionScore) / 2;
+  return Math.round(finalScore * 100);
 }

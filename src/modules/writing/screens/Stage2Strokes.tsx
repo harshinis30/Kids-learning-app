@@ -22,6 +22,8 @@ import {
     View,
 } from 'react-native';
 import Svg, { Circle, Ellipse, G, Path, Rect } from 'react-native-svg';
+import { computeAccuracy } from '../utils/accuracy.js';
+import { canProgress, getFeedback } from '../utils/scoring.js';
 import { useWritingCompletion } from './WritingLevelHub';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -478,6 +480,8 @@ function DrawingCanvas({
     const [showKeyDots, setShowKeyDots] = useState(true);
     const [isDrawing, setIsDrawing] = useState(false);
     const [completed, setCompleted] = useState(false);
+    const [accuracy, setAccuracy] = useState<number | null>(null);
+    const [feedback, setFeedback] = useState<{ message: string; emoji: string } | null>(null);
 
     // *** CRITICAL: Use refs so PanResponder always reads latest state ***
     const phaseRef = useRef<Phase>(phase);
@@ -659,18 +663,38 @@ function DrawingCanvas({
                 if (reached === 0) { setMiloState('nudge'); return; }
                 if (reached < totalCps) { setMiloState('nudge'); return; }
 
-                // All checkpoints reached — success!
-                setCompleted(true);
+                // All checkpoints reached — now compute PATH-BASED accuracy
+                // Normalize drawn points from pixel coords to 0–1
+                const normalizedDrawn = drawnPointsRef.current.map(pt => ({
+                    x: pt.x / CANVAS_W,
+                    y: pt.y / CANVAS_H,
+                }));
+                const acc = computeAccuracy(
+                    normalizedDrawn,
+                    level.guidePath,
+                    { width: CANVAS_W, height: CANVAS_H }
+                );
+                const fb = getFeedback(acc);
+                const passes = canProgress(acc);
 
-                if (phaseRef.current === 'guided') {
-                    // 3 stars — complete immediately, no free-draw phase
-                    setStarsEarned(3);
-                    onStarEarned(1);
-                    setTimeout(() => onStarEarned(2), 400);
-                    setTimeout(() => onStarEarned(3), 800);
+                setAccuracy(acc);
+                setFeedback(fb);
+
+                if (passes) {
+                    setCompleted(true);
+                    // Award stars based on accuracy
+                    const earnedStars = acc >= 90 ? 3 : acc >= 70 ? 2 : 1;
+                    setStarsEarned(earnedStars);
+                    for (let i = 1; i <= earnedStars; i++) {
+                        const idx = i;
+                        setTimeout(() => onStarEarned(idx), (idx - 1) * 400);
+                    }
                     setMiloState(level.id === 9 ? 'boss' : 'complete');
                     setShowConfetti(true);
-                    setTimeout(() => { onComplete(3); }, 2500);
+                    setTimeout(() => { onComplete(earnedStars); }, 2500);
+                } else {
+                    // Accuracy too low — show fail overlay, allow retry
+                    setMiloState('offpath');
                 }
             },
         })
@@ -797,6 +821,49 @@ function DrawingCanvas({
 
             {/* Confetti */}
             <MiniConfetti visible={showConfetti} />
+
+            {/* Accuracy overlay — success */}
+            {completed && accuracy !== null && feedback && (
+                <View style={s.accuracyOverlay}>
+                    <Text style={{ fontSize: 72 }}>{feedback.emoji}</Text>
+                    <Text style={s.accuracyOverlayTitle}>{feedback.message}</Text>
+                    <View style={[s.accuracyBadge, { borderColor: '#4CD964' }]}>
+                        <Text style={s.accuracyBadgeText}>Accuracy: {accuracy}%</Text>
+                    </View>
+                </View>
+            )}
+
+            {/* Accuracy overlay — fail (< 60%) */}
+            {!completed && accuracy !== null && feedback && !isDrawing && (
+                <View style={s.accuracyOverlay}>
+                    <Text style={{ fontSize: 72 }}>{feedback.emoji}</Text>
+                    <Text style={s.accuracyOverlayTitle}>{feedback.message}</Text>
+                    <View style={[s.accuracyBadge, { borderColor: PAL.coral }]}>
+                        <Text style={s.accuracyBadgeText}>Accuracy: {accuracy}%</Text>
+                    </View>
+                    <Text style={{ fontSize: 13, color: PAL.brown, fontWeight: '700', marginTop: 4 }}>Need 70% to advance</Text>
+                    <TouchableOpacity
+                        style={[s.controlBtn, s.controlBtnPrimary, { marginTop: 12 }]}
+                        onPress={() => {
+                            // Reset for retry
+                            drawnPointsRef.current = [];
+                            drawnPathRef.current = '';
+                            setDrawnPath('');
+                            setAccuracy(null);
+                            setFeedback(null);
+                            setMiloState('idle');
+                            nextCpIdxRef.current = 0;
+                            reachedCpsRef.current = new Set();
+                            setNextCpIdx(0);
+                            setReachedCps(new Set());
+                        }}
+                        activeOpacity={0.7}
+                    >
+                        <Text style={{ fontSize: 20 }}>🔁</Text>
+                        <Text style={[s.controlLabel, { color: PAL.textDark }]}>Try Again</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
         </View>
     );
 }
@@ -1168,6 +1235,28 @@ const s = StyleSheet.create({
     },
     starSlot: { fontSize: 22, color: '#E0E0E0' },
     starSlotEarned: { color: undefined },
+
+    // Accuracy overlay
+    accuracyOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(255,253,245,0.94)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 10,
+        paddingHorizontal: 24,
+        zIndex: 30,
+        borderRadius: 20,
+    },
+    accuracyOverlayTitle: {
+        fontSize: 22, fontWeight: '900', color: PAL.textDark, textAlign: 'center',
+    },
+    accuracyBadge: {
+        borderWidth: 2, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 30,
+        backgroundColor: 'rgba(255,255,255,0.8)',
+    },
+    accuracyBadgeText: {
+        fontSize: 20, fontWeight: '800', color: PAL.textDark,
+    },
 
     // Summary
     summaryRoot: { flex: 1, backgroundColor: PAL.sky },
