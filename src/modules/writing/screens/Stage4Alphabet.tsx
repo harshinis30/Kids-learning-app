@@ -20,7 +20,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import Svg, { Circle, Ellipse, G, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, Defs, Ellipse, G, LinearGradient as SvgLinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { computeAccuracy } from '../utils/accuracy.js';
 import { canProgress, getFeedback } from '../utils/scoring.js';
 import { useWritingCompletion } from './WritingLevelHub';
@@ -308,36 +308,59 @@ function MiloReactor({ state }: { state: MiloState }) {
     );
 }
 
-// ── Sparkle Ball / Monkey Guide (same as Stage 2) ─────────────────────────────
+// ── Sparkle Guide (colorful pulsing tip) ──────────────────────────────────────
 
-function SparkleBall({ x, y, visible }: { x: number; y: number; visible: boolean }) {
-    const [bounceAnim] = useState(new Animated.Value(0));
+function SparkleGuide({ x, y, visible, isDemo }: { x: number; y: number; visible: boolean; isDemo?: boolean }) {
+    const [pulseAnim] = useState(new Animated.Value(0));
+    const [glowAnim] = useState(new Animated.Value(0));
 
     useEffect(() => {
         Animated.loop(
             Animated.sequence([
-                Animated.timing(bounceAnim, { toValue: -8, duration: 350, useNativeDriver: true }),
-                Animated.timing(bounceAnim, { toValue: 0, duration: 350, useNativeDriver: true }),
+                Animated.timing(pulseAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+                Animated.timing(pulseAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
             ])
         ).start();
-    }, [bounceAnim]);
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(glowAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+                Animated.timing(glowAnim, { toValue: 0, duration: 800, useNativeDriver: true }),
+            ])
+        ).start();
+    }, [pulseAnim, glowAnim]);
 
     if (!visible) return null;
 
+    const scale = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.25] });
+    const glowOpacity = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0.9] });
+
     return (
-        <Animated.View
-            style={[
-                s.sparkleBall,
-                {
-                    left: x - 22,
-                    top: y - 22,
-                    transform: [{ translateY: bounceAnim }],
-                },
-            ]}
-            pointerEvents="none"
-        >
-            <Text style={{ fontSize: 36 }}>🐒</Text>
-        </Animated.View>
+        <View pointerEvents="none" style={{ position: 'absolute', left: x - 28, top: y - 28, width: 56, height: 56, zIndex: 20 }}>
+            <Animated.View
+                style={{
+                    position: 'absolute', left: -6, top: -6, width: 68, height: 68, borderRadius: 34,
+                    backgroundColor: isDemo ? 'rgba(255, 215, 0, 0.2)' : 'rgba(78, 205, 196, 0.2)',
+                    opacity: glowOpacity,
+                }}
+            />
+            <Animated.View
+                style={{
+                    width: 56, height: 56, borderRadius: 28,
+                    backgroundColor: isDemo ? 'rgba(255, 215, 0, 0.35)' : 'rgba(78, 205, 196, 0.35)',
+                    borderWidth: 2.5,
+                    borderColor: isDemo ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.6)',
+                    alignItems: 'center', justifyContent: 'center',
+                    transform: [{ scale }],
+                    shadowColor: isDemo ? '#FFD700' : '#4ECDC4',
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: 0.8,
+                    shadowRadius: 12,
+                    elevation: 8,
+                }}
+            >
+                <Text style={{ fontSize: isDemo ? 28 : 24 }}>{isDemo ? '✨' : '👆'}</Text>
+            </Animated.View>
+        </View>
     );
 }
 
@@ -441,6 +464,9 @@ function DrawingCanvas({
     const [sparkleVisible, setSparkleVisible] = useState(false);
     const [demoProgress, setDemoProgress] = useState(0);
     const [showGuide, setShowGuide] = useState(true);
+    // Rainbow demo trail state
+    const demoTrailRef = useRef('');
+    const [demoTrailPath, setDemoTrailPath] = useState('');
     const [showKeyDots, setShowKeyDots] = useState(true);
     const [isDrawing, setIsDrawing] = useState(false);
     const [completed, setCompleted] = useState(false);
@@ -456,10 +482,17 @@ function DrawingCanvas({
     useEffect(() => { starsEarnedRef.current = starsEarned; }, [starsEarned]);
 
     const drawnPointsRef = useRef<Array<{ x: number; y: number }>>([]);
+    // Accumulate all drawn points across multiple strokes for accuracy
+    const allDrawnPointsRef = useRef<Array<{ x: number; y: number }>>([]);
     const onPathCountRef = useRef(0);
     const totalPointsRef = useRef(0);
     const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const demoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // Hint animation state (when kid gets stuck)
+    const hintTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const hintTrailRef = useRef('');
+    const [hintTrailPath, setHintTrailPath] = useState('');
+    const [showingHint, setShowingHint] = useState(false);
 
     const trailColor = TRAIL_COLORS[(level.id - 1) % TRAIL_COLORS.length];
     const guideSvgPath = useMemo(() => buildLetterSvgPath(level.guidePath, level.smooth), [level]);
@@ -474,12 +507,15 @@ function DrawingCanvas({
         drawnPathRef.current = '';
         setDrawnPath('');
         drawnPointsRef.current = [];
+        allDrawnPointsRef.current = [];
+        demoTrailRef.current = '';
+        setDemoTrailPath('');
 
         let step = 0;
         const total = level.guidePath.length;
         if (demoTimerRef.current) clearInterval(demoTimerRef.current);
 
-        const intervalMs = Math.max(40, Math.round(2500 / total));
+        const intervalMs = Math.max(40, Math.round(3000 / total));
 
         demoTimerRef.current = setInterval(() => {
             if (step >= total) {
@@ -487,16 +523,25 @@ function DrawingCanvas({
                 setSparkleVisible(false);
                 setMiloState('idle');
                 setTimeout(() => {
+                    demoTrailRef.current = '';
+                    setDemoTrailPath('');
                     setPhase('guided');
                     setShowGuide(true);
                     setShowKeyDots(true);
-                }, 800);
+                }, 1200);
                 return;
             }
             const pt = level.guidePath[step];
             const mapped = letterToCanvas(pt);
             setSparklePos({ x: mapped.x, y: mapped.y });
             setDemoProgress(step / (total - 1));
+            // Build progressive rainbow trail
+            if (step === 0) {
+                demoTrailRef.current = `M ${mapped.x} ${mapped.y}`;
+            } else {
+                demoTrailRef.current += ` L ${mapped.x} ${mapped.y}`;
+            }
+            setDemoTrailPath(demoTrailRef.current);
             step++;
         }, intervalMs);
     }, [level]);
@@ -509,19 +554,84 @@ function DrawingCanvas({
         };
     }, [runDemo]);
 
-    // Idle nudge
+    // ── Hint Animation (when kid gets stuck) ──────────────────────────────────
+
+    const stopHint = useCallback(() => {
+        if (hintTimerRef.current) { clearInterval(hintTimerRef.current); hintTimerRef.current = null; }
+        hintTrailRef.current = '';
+        setHintTrailPath('');
+        setShowingHint(false);
+        setSparkleVisible(false);
+    }, []);
+
+    const runHintAnimation = useCallback(() => {
+        const curCp = nextCpIdxRef.current;
+        let startGuideIdx: number;
+
+        if (curCp === 0) {
+            startGuideIdx = 0;
+        } else if (curCp <= level.keyPoints.length - 1) {
+            startGuideIdx = level.keyPoints[curCp - 1];
+        } else {
+            startGuideIdx = level.keyPoints[level.keyPoints.length - 1];
+        }
+
+        const hintPoints = level.guidePath.slice(startGuideIdx);
+        if (hintPoints.length < 2) return;
+
+        setShowingHint(true);
+        setMiloState('demo');
+        hintTrailRef.current = '';
+        setHintTrailPath('');
+        setSparkleVisible(true);
+
+        let step = 0;
+        const total = hintPoints.length;
+        const intervalMs = Math.max(40, Math.round(2500 / total));
+
+        if (hintTimerRef.current) clearInterval(hintTimerRef.current);
+
+        hintTimerRef.current = setInterval(() => {
+            if (step >= total) {
+                if (hintTimerRef.current) clearInterval(hintTimerRef.current);
+                hintTimerRef.current = null;
+                setTimeout(() => {
+                    stopHint();
+                    setMiloState('nudge');
+                    setTimeout(() => setMiloState('idle'), 1500);
+                }, 800);
+                return;
+            }
+            const pt = hintPoints[step];
+            const mapped = letterToCanvas(pt);
+            setSparklePos({ x: mapped.x, y: mapped.y });
+            if (step === 0) {
+                hintTrailRef.current = `M ${mapped.x} ${mapped.y}`;
+            } else {
+                hintTrailRef.current += ` L ${mapped.x} ${mapped.y}`;
+            }
+            setHintTrailPath(hintTrailRef.current);
+            step++;
+        }, intervalMs);
+    }, [level, stopHint]);
+
+    // Idle detection — trigger hint after 4s of inactivity
     useEffect(() => {
         if (phase === 'demo' || completed) return;
-        const resetIdle = () => {
+        if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+        if (isDrawing) {
+            stopHint();
+            return;
+        }
+        idleTimerRef.current = setTimeout(() => {
+            if (!showingHint) {
+                runHintAnimation();
+            }
+        }, 4000);
+        return () => {
             if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-            idleTimerRef.current = setTimeout(() => {
-                setMiloState('nudge');
-                setTimeout(() => setMiloState('idle'), 2000);
-            }, 5000);
         };
-        resetIdle();
-        return () => { if (idleTimerRef.current) clearTimeout(idleTimerRef.current); };
-    }, [phase, isDrawing, completed]);
+    }, [phase, isDrawing, completed, showingHint, runHintAnimation, stopHint]);
 
     // ── Checkpoint State (same as Stage 2) ────────────────────────────────────
 
@@ -530,7 +640,11 @@ function DrawingCanvas({
         if (level.closed && pts.length > 1) {
             const first = pts[0]; const last = pts[pts.length - 1];
             const d = Math.sqrt((first.x - last.x) ** 2 + (first.y - last.y) ** 2);
-            if (d < 8) pts.pop();
+            if (d >= 8) {
+                // Last keyPoint is NOT at start — add a closing checkpoint
+                pts.push({ x: first.x, y: first.y });
+            }
+            // If d < 8: last keyPoint is already at start — keep it
         }
         return pts;
     }, [level]);
@@ -556,17 +670,24 @@ function DrawingCanvas({
             onPanResponderGrant: (evt) => {
                 if (phaseRef.current === 'demo' || completedRef.current) return;
                 const { locationX, locationY } = evt.nativeEvent;
+                // Start a new stroke segment — current stroke points reset
                 drawnPointsRef.current = [{ x: locationX, y: locationY }];
-                drawnPathRef.current = `M ${locationX} ${locationY}`;
+                // MULTI-STROKE: Append a new M command to existing path instead of replacing
+                if (drawnPathRef.current && drawnPathRef.current.startsWith('M')) {
+                    drawnPathRef.current += ` M ${locationX} ${locationY}`;
+                } else {
+                    drawnPathRef.current = `M ${locationX} ${locationY}`;
+                }
                 setDrawnPath(drawnPathRef.current);
                 onPathCountRef.current = 0;
                 totalPointsRef.current = 0;
                 setIsDrawing(true);
                 setMiloState('idle');
-                nextCpIdxRef.current = 0;
-                reachedCpsRef.current = new Set();
-                setNextCpIdx(0);
-                setReachedCps(new Set());
+                // Stop any hint animation when kid starts drawing
+                if (hintTimerRef.current) { clearInterval(hintTimerRef.current); hintTimerRef.current = null; }
+                hintTrailRef.current = '';
+                setHintTrailPath('');
+                setShowingHint(false);
             },
             onPanResponderMove: (evt) => {
                 if (phaseRef.current === 'demo' || completedRef.current) return;
@@ -609,15 +730,23 @@ function DrawingCanvas({
                 setIsDrawing(false);
                 setSparkleVisible(false);
 
+                // MULTI-STROKE: Save this stroke's points into the accumulated set
+                allDrawnPointsRef.current = allDrawnPointsRef.current.concat(drawnPointsRef.current);
+
                 const totalCps = effectiveCheckpoints.length;
                 const reached = reachedCpsRef.current.size;
 
                 if (reached === 0) { setMiloState('nudge'); return; }
-                if (reached < totalCps) { setMiloState('nudge'); return; }
+                // Still have checkpoints to reach — show encouraging feedback, let them keep drawing
+                if (reached < totalCps) {
+                    setMiloState('good');
+                    setTimeout(() => setMiloState('idle'), 1500);
+                    return;
+                }
 
                 // All checkpoints reached — now compute PATH-BASED accuracy
-                // Reverse the letter-box mapping to normalize drawn points to 0–1
-                const normalizedDrawn = drawnPointsRef.current.map(pt => ({
+                // Reverse the letter-box mapping to normalize ALL drawn points to 0–1
+                const normalizedDrawn = allDrawnPointsRef.current.map(pt => ({
                     x: (pt.x - LETTER_OX) / LETTER_SIZE,
                     y: (pt.y - LETTER_OY) / LETTER_SIZE,
                 }));
@@ -654,8 +783,10 @@ function DrawingCanvas({
     const keyDots = showKeyDots
         ? effectiveCheckpoints.map((cp, i) => {
             const isStart = i === 0;
+            const isClosing = level.closed && i === effectiveCheckpoints.length - 1;
             const isReached = reachedCps.has(i);
             const isNextTarget = i === nextCpIdx;
+            if (isClosing && !isNextTarget && !isReached && isStart) return null;
             return (
                 <View
                     key={i}
@@ -678,7 +809,7 @@ function DrawingCanvas({
                     pointerEvents="none"
                 >
                     <Text style={[s.keyDotText, (isStart || isReached) && { color: PAL.white }]}>
-                        {isReached ? '✓' : isStart ? '▶' : i + 1}
+                        {isReached ? '✓' : isStart ? '▶' : isClosing ? '🏁' : i + 1}
                     </Text>
                 </View>
             );
@@ -721,15 +852,36 @@ function DrawingCanvas({
                     </Svg>
                 )}
 
+                {/* Rainbow Demo Trail */}
+                {demoTrailPath !== '' && demoTrailPath.startsWith('M') && (
+                    <Svg width={CANVAS_W} height={CANVAS_H} style={StyleSheet.absoluteFill} pointerEvents="none">
+                        <Defs>
+                            {/* Rainbow: Coral → Orange → Yellow → Green → Sky Blue → Lavender */}
+                            <SvgLinearGradient id="letterRainbow" x1="0" y1="0" x2={String(CANVAS_W)} y2={String(CANVAS_H)} gradientUnits="userSpaceOnUse">
+                                <Stop offset="0%" stopColor="#FF6B6B" />
+                                <Stop offset="18%" stopColor="#FF9F43" />
+                                <Stop offset="36%" stopColor="#FECA57" />
+                                <Stop offset="54%" stopColor="#6BCB77" />
+                                <Stop offset="72%" stopColor="#48DBFB" />
+                                <Stop offset="90%" stopColor="#A29BFE" />
+                                <Stop offset="100%" stopColor="#FF6B6B" />
+                            </SvgLinearGradient>
+                        </Defs>
+                        <G>
+                            <Path d={demoTrailPath} stroke="url(#letterRainbow)" strokeWidth={36} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.18} />
+                            <Path d={demoTrailPath} stroke="url(#letterRainbow)" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.35} />
+                            <Path d={demoTrailPath} stroke="url(#letterRainbow)" strokeWidth={14} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.85} />
+                            <Path d={demoTrailPath} stroke="#FFFFFF" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.6} />
+                        </G>
+                    </Svg>
+                )}
+
                 {/* Drawn trail (same 3-layer crayon as Stage 2) */}
                 {drawnPath !== '' && drawnPath.startsWith('M') && (
                     <Svg width={CANVAS_W} height={CANVAS_H} style={StyleSheet.absoluteFill} pointerEvents="none">
                         <G>
-                            {/* Outer glow */}
                             <Path d={drawnPath} stroke={trailColor} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.25} />
-                            {/* Main trail */}
                             <Path d={drawnPath} stroke={trailColor} strokeWidth={20} strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                            {/* Inner highlight */}
                             <Path d={drawnPath} stroke={PAL.white} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.5} />
                         </G>
                     </Svg>
@@ -738,8 +890,30 @@ function DrawingCanvas({
                 {/* Key point dots */}
                 {keyDots}
 
-                {/* Sparkle ball monkey guide */}
-                <SparkleBall x={sparklePos.x} y={sparklePos.y} visible={sparkleVisible} />
+                {/* ── Hint Trail (when kid is stuck) ── */}
+                {hintTrailPath !== '' && hintTrailPath.startsWith('M') && (
+                    <Svg width={CANVAS_W} height={CANVAS_H} style={StyleSheet.absoluteFill} pointerEvents="none">
+                        <Defs>
+                            <SvgLinearGradient id="letterHintRainbow" x1="0" y1="0" x2={String(CANVAS_W)} y2={String(CANVAS_H)} gradientUnits="userSpaceOnUse">
+                                <Stop offset="0%" stopColor="#FF6B6B" />
+                                <Stop offset="20%" stopColor="#FF9F43" />
+                                <Stop offset="40%" stopColor="#FECA57" />
+                                <Stop offset="60%" stopColor="#6BCB77" />
+                                <Stop offset="80%" stopColor="#48DBFB" />
+                                <Stop offset="100%" stopColor="#A29BFE" />
+                            </SvgLinearGradient>
+                        </Defs>
+                        <G>
+                            <Path d={hintTrailPath} stroke="url(#letterHintRainbow)" strokeWidth={28} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.15} />
+                            <Path d={hintTrailPath} stroke="url(#letterHintRainbow)" strokeWidth={18} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.4} />
+                            <Path d={hintTrailPath} stroke="url(#letterHintRainbow)" strokeWidth={10} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.75} />
+                            <Path d={hintTrailPath} stroke="#FFFFFF" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.5} />
+                        </G>
+                    </Svg>
+                )}
+
+                {/* Sparkle guide */}
+                <SparkleGuide x={sparklePos.x} y={sparklePos.y} visible={sparkleVisible} isDemo={phase === 'demo' || showingHint} />
 
                 {/* Pan responder touch area (touchAction: 'none' critical for web) */}
                 <View
@@ -751,7 +925,7 @@ function DrawingCanvas({
             {/* Phase indicator */}
             <View style={s.phaseBar}>
                 <Text style={s.phaseText}>
-                    {phase === 'demo' ? '👀 Watch Milo!' : `✏️ Trace the letter ${level.letter}!`}
+                    {phase === 'demo' ? '👀 Watch the path!' : showingHint ? '👀 Follow the sparkle!' : `✏️ Trace the letter ${level.letter}!`}
                 </Text>
             </View>
 
@@ -806,7 +980,9 @@ function DrawingCanvas({
                     <TouchableOpacity
                         style={[s.controlBtn, s.controlBtnPrimary, { marginTop: 12 }]}
                         onPress={() => {
+                            // Full reset for retry — clear all strokes
                             drawnPointsRef.current = [];
+                            allDrawnPointsRef.current = [];
                             drawnPathRef.current = '';
                             setDrawnPath('');
                             setAccuracy(null);

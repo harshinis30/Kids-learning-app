@@ -30,9 +30,12 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, {
     Circle,
+    Defs,
     G,
+    LinearGradient as SvgLinearGradient,
     Path,
-    Rect
+    Rect,
+    Stop
 } from 'react-native-svg';
 
 import expectedPathsData from '../data/expectedPaths.json';
@@ -416,7 +419,14 @@ function Stage1Gameplay() {
     const expectedPath = expectedPathsData[scene.key] as Array<{ x: number; y: number }>;
 
     const drawnPointsRef = useRef<Array<{ x: number; y: number }>>([]);
+    // Accumulate all drawn points across multiple strokes for accuracy
+    const allDrawnPointsRef = useRef<Array<{ x: number; y: number }>>([]);
     const [drawnPathD, setDrawnPathD] = useState('');
+    // Hint animation state (when kid gets stuck)
+    const hintTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const hintTrailRef = useRef('');
+    const [hintTrailPath, setHintTrailPath] = useState('');
+    const [showingHint, setShowingHint] = useState(false);
 
     const miloX = useSharedValue(scene.miloStartNorm.x * W - MILO_SIZE / 2);
     const miloY = useSharedValue(scene.miloStartNorm.y * H - MILO_SIZE / 2);
@@ -454,7 +464,13 @@ function Stage1Gameplay() {
 
     const resetScene = useCallback(() => {
         drawnPointsRef.current = [];
+        allDrawnPointsRef.current = [];
         setDrawnPathD('');
+        // Clear hint
+        if (hintTimerRef.current) { clearInterval(hintTimerRef.current); hintTimerRef.current = null; }
+        hintTrailRef.current = '';
+        setHintTrailPath('');
+        setShowingHint(false);
         miloX.value = withSpring(scene.miloStartNorm.x * W - MILO_SIZE / 2, { damping: 14, stiffness: 120 });
         miloY.value = withSpring(scene.miloStartNorm.y * H - MILO_SIZE / 2, { damping: 14, stiffness: 120 });
         setColorIndex(c => c + 1);
@@ -472,7 +488,13 @@ function Stage1Gameplay() {
         const nextCfg = SCENES[next];
         setCurrentScene(next);
         drawnPointsRef.current = [];
+        allDrawnPointsRef.current = [];
         setDrawnPathD('');
+        // Clear hint
+        if (hintTimerRef.current) { clearInterval(hintTimerRef.current); hintTimerRef.current = null; }
+        hintTrailRef.current = '';
+        setHintTrailPath('');
+        setShowingHint(false);
         miloX.value = nextCfg.miloStartNorm.x * W - MILO_SIZE / 2;
         miloY.value = nextCfg.miloStartNorm.y * H - MILO_SIZE / 2;
         setColorIndex(0);
@@ -484,8 +506,20 @@ function Stage1Gameplay() {
     const panGesture = Gesture.Pan()
         .runOnJS(true)
         .onStart((e) => {
+            // Start a new stroke segment — current stroke points reset
             drawnPointsRef.current = [{ x: e.x / W, y: e.y / H }];
-            setDrawnPathD(`M ${e.x} ${e.y}`);
+            // Stop any hint animation when kid starts drawing
+            if (hintTimerRef.current) { clearInterval(hintTimerRef.current); hintTimerRef.current = null; }
+            hintTrailRef.current = '';
+            setHintTrailPath('');
+            setShowingHint(false);
+            // MULTI-STROKE: Append new stroke to existing path
+            setDrawnPathD(prev => {
+                if (prev && prev.startsWith('M')) {
+                    return `${prev} M ${e.x} ${e.y}`;
+                }
+                return `M ${e.x} ${e.y}`;
+            });
             setAccuracy(null);
             setFeedback(null);
             setGameState('drawing');
@@ -499,7 +533,10 @@ function Stage1Gameplay() {
             miloY.value = withSpring(e.y - MILO_SIZE / 2, { damping: 20, stiffness: 200 });
         })
         .onEnd(() => {
-            const acc = computeAccuracy(drawnPointsRef.current, expectedPath, DIMS);
+            // MULTI-STROKE: Accumulate this stroke's points
+            allDrawnPointsRef.current = allDrawnPointsRef.current.concat(drawnPointsRef.current);
+
+            const acc = computeAccuracy(allDrawnPointsRef.current, expectedPath, DIMS);
             const fb = getFeedback(acc);
             const progresses = canProgress(acc);
 
@@ -517,6 +554,64 @@ function Stage1Gameplay() {
         });
 
     const strokeColor = TRAIL_COLORS[colorIndex % TRAIL_COLORS.length];
+
+    // ── Hint Animation (when kid gets stuck) ──────────────────────────────────
+    // After 4s of inactivity (idle or fail), animate a rainbow trail along
+    // the expected path to show the kid how to draw.
+
+    const stopHint = useCallback(() => {
+        if (hintTimerRef.current) { clearInterval(hintTimerRef.current); hintTimerRef.current = null; }
+        hintTrailRef.current = '';
+        setHintTrailPath('');
+        setShowingHint(false);
+    }, []);
+
+    const runHintAnimation = useCallback(() => {
+        const pts = expectedPath;
+        if (!pts || pts.length < 2) return;
+
+        setShowingHint(true);
+        hintTrailRef.current = '';
+        setHintTrailPath('');
+
+        let step = 0;
+        const total = pts.length;
+        const intervalMs = Math.max(40, Math.round(2500 / total));
+
+        if (hintTimerRef.current) clearInterval(hintTimerRef.current);
+
+        hintTimerRef.current = setInterval(() => {
+            if (step >= total) {
+                if (hintTimerRef.current) clearInterval(hintTimerRef.current);
+                hintTimerRef.current = null;
+                // Keep trail visible briefly then clear
+                setTimeout(() => {
+                    stopHint();
+                }, 1200);
+                return;
+            }
+            const pt = pts[step];
+            const px = pt.x * W;
+            const py = pt.y * H;
+            if (step === 0) {
+                hintTrailRef.current = `M ${px} ${py}`;
+            } else {
+                hintTrailRef.current += ` L ${px} ${py}`;
+            }
+            setHintTrailPath(hintTrailRef.current);
+            step++;
+        }, intervalMs);
+    }, [expectedPath, stopHint]);
+
+    // Idle detection — trigger hint after 4s of inactivity
+    useEffect(() => {
+        if (gameState === 'drawing' || gameState === 'success' || gameState === 'complete') return;
+        if (showingHint) return;
+        const timer = setTimeout(() => {
+            runHintAnimation();
+        }, 4000);
+        return () => clearTimeout(timer);
+    }, [gameState, showingHint, runHintAnimation, currentScene]);
 
     if (gameState === 'complete') {
         return (
@@ -552,7 +647,12 @@ function Stage1Gameplay() {
                                 setFeedback(null);
                                 setColorIndex(0);
                                 drawnPointsRef.current = [];
+                                allDrawnPointsRef.current = [];
                                 setDrawnPathD('');
+                                if (hintTimerRef.current) { clearInterval(hintTimerRef.current); hintTimerRef.current = null; }
+                                hintTrailRef.current = '';
+                                setHintTrailPath('');
+                                setShowingHint(false);
                                 setGameState('idle');
                             }}
                         >
@@ -648,6 +748,33 @@ function Stage1Gameplay() {
                                         fill="none"
                                         opacity={0.7}
                                     />
+                                </G>
+                            </Svg>
+                        )}
+
+                        {/* Hint Trail layer (when kid is stuck) */}
+                        {hintTrailPath !== '' && hintTrailPath.startsWith('M') && (
+                            <Svg
+                                width="100%"
+                                height="100%"
+                                style={[StyleSheet.absoluteFill, { userSelect: 'none', touchAction: 'none' } as any]}
+                                pointerEvents="none"
+                            >
+                                <Defs>
+                                    <SvgLinearGradient id="stage1HintRainbow" x1="0" y1="0" x2={String(W)} y2={String(H)} gradientUnits="userSpaceOnUse">
+                                        <Stop offset="0%" stopColor="#FF6B6B" />
+                                        <Stop offset="20%" stopColor="#FF9F43" />
+                                        <Stop offset="40%" stopColor="#FECA57" />
+                                        <Stop offset="60%" stopColor="#6BCB77" />
+                                        <Stop offset="80%" stopColor="#48DBFB" />
+                                        <Stop offset="100%" stopColor="#A29BFE" />
+                                    </SvgLinearGradient>
+                                </Defs>
+                                <G>
+                                    <Path d={hintTrailPath} stroke="url(#stage1HintRainbow)" strokeWidth={28} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.15} />
+                                    <Path d={hintTrailPath} stroke="url(#stage1HintRainbow)" strokeWidth={18} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.4} />
+                                    <Path d={hintTrailPath} stroke="url(#stage1HintRainbow)" strokeWidth={10} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.75} />
+                                    <Path d={hintTrailPath} stroke="#FFFFFF" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" fill="none" opacity={0.5} />
                                 </G>
                             </Svg>
                         )}
