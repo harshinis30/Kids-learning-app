@@ -1,7 +1,7 @@
 const fs = require('fs');
 
 try {
-    const glbPath = './assets/models/rain.glb';
+    const glbPath = './assets/models/rain_v3.2.glb';
     const buffer = fs.readFileSync(glbPath);
 
     // The glb is a binary format. The JSON chunk is usually the first chunk.

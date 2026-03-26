@@ -19,6 +19,7 @@ import { Scene3D } from '../../components/Scene3D';
 import { SessionSummary } from '../../components/SessionSummary';
 import { StarRating } from '../../components/StarRating';
 import { CurriculumItem, STAGE_NAMES, STAGE_REQUIRED_STARS, getStageItems } from '../../data/curriculum';
+import { getPronunciationScore, PronunciationResult, computeStars } from '../../services/scoringService';
 import { playSound } from '../../services/audioService';
 import { LipSyncAnimation } from '../../services/lipSyncService';
 import { PetEmotion, triggerEmotion } from '../../services/petService';
@@ -33,13 +34,6 @@ const { width, height } = Dimensions.get('window');
 const COLUMN_W = Math.floor((width - 32) / 3); // 3 columns minus padding
 const SESSION_LENGTH = 5; // Show summary every 5 items
 
-function computeStars(accuracy: number): number {
-    if (accuracy >= 90) return 3;
-    if (accuracy >= 70) return 2;
-    if (accuracy >= 50) return 1;
-    return 0;
-}
-
 export default function LearnScreen() {
     const [profile, setProfile] = useState<ChildProfile | null>(null);
     const [items, setItems] = useState<CurriculumItem[]>([]);
@@ -53,6 +47,13 @@ export default function LearnScreen() {
     const [attemptCount, setAttemptCount] = useState(0);
     const [showConfetti, setShowConfetti] = useState(false);
     const [showHint, setShowHint] = useState(false);
+    
+    const [phonemes, setPhonemes] = useState<{phoneme: string; accuracyScore: number}[]>([]);
+    const [fluency, setFluency] = useState<number | undefined>();
+    const [completeness, setCompleteness] = useState<number | undefined>();
+    const [prosody, setProsody] = useState<number | undefined>();
+    const [lastAudioUri, setLastAudioUri] = useState<string | null>(null);
+    const [meteringLevel, setMeteringLevel] = useState<number | undefined>();
 
     // Session tracking
     const [sessionStars, setSessionStars] = useState(0);
@@ -83,9 +84,6 @@ export default function LearnScreen() {
     // ── Load profile & curriculum ──────────────────────────────────────────
     useEffect(() => {
         (async () => {
-            await Audio.requestPermissionsAsync();
-            await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-
             const p = await profileService.getActiveProfile();
             if (!p) return;
             setProfile(p);
@@ -172,9 +170,21 @@ export default function LearnScreen() {
 
     const startRecording = async () => {
         try {
+            await Audio.requestPermissionsAsync();
+            await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+            
             setLearningState('recording');
-            const { recording: rec } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+            const { recording: rec } = await Audio.Recording.createAsync(
+                Audio.RecordingOptionsPresets.HIGH_QUALITY,
+                (status) => {
+                    if (status.metering !== undefined) {
+                        setMeteringLevel(status.metering);
+                    }
+                },
+                100
+            );
             setRecording(rec);
+            setLastAudioUri(null);
         } catch (e) {
             console.error('Recording error:', e);
             setLearningState('listen');
@@ -186,35 +196,59 @@ export default function LearnScreen() {
         try {
             setLearningState('analyzing');
             await recording.stopAndUnloadAsync();
+            // Reset audio mode so sound effects and TTS can play
+            await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+            const uri = recording.getURI();
+            setLastAudioUri(uri);
             setRecording(null);
-            await analyzePronunciation();
+            await analyzePronunciation(uri);
         } catch (e) {
             console.error('Stop recording error:', e);
             setLearningState('listen');
         }
     };
 
-    const analyzePronunciation = async () => {
-        if (!currentItem || !profile) return;
-        await delay(1200);
+    const analyzePronunciation = async (audioUri?: string | null) => {
+        if (!currentItem || !profile || !audioUri) {
+            setLearningState('listen');
+            return;
+        }
 
-        // Simulated accuracy — in production, replace with real speech recognition
-        const base = 60 + Math.random() * 40;
         const attempt = attemptCount + 1;
         setAttemptCount(attempt);
 
-        const simulatedAccuracy = Math.min(100, base + (attempt > 1 ? 5 : 0));
-        const earnedStars = computeStars(simulatedAccuracy);
+        let result = null;
+        try {
+            result = await getPronunciationScore(currentItem.displayText, audioUri);
+        } catch (error) {
+            console.error('[Learn Screen] Scoring failed:', error);
+            setFeedbackMessage('Oops, there was an error processing your audio. Let\'s try again.');
+            setLearningState('feedback');
+            return;
+        }
 
-        setAccuracy(simulatedAccuracy);
+        if (!result) {
+            setFeedbackMessage('Oops, I couldn\'t hear you clearly. Let\'s try again.');
+            setLearningState('listen');
+            return;
+        }
+
+        const earnedStars = computeStars(result);
+        const actualAccuracy = result.compositeScore;
+
+        setAccuracy(actualAccuracy);
         setStars(earnedStars);
+        setPhonemes(result.phonemes);
+        setFluency(result.fluencyScore);
+        setCompleteness(result.completenessScore);
+        setProsody(result.prosodyScore);
         setLearningState('feedback');
 
         // Record to problem tracker
-        await problemTracker.recordPhonemeAttempt(profile.id, currentItem.targetPhonemes, simulatedAccuracy);
+        await problemTracker.recordPhonemeAttempt(profile.id, currentItem.targetPhonemes, actualAccuracy);
 
         // Record to progress tracker
-        await progressTracker.recordItemAttempt(profile.id, currentItem.id, simulatedAccuracy, earnedStars);
+        await progressTracker.recordItemAttempt(profile.id, currentItem.id, actualAccuracy, earnedStars);
         await progressTracker.updateStageProgress(profile.id, currentItem.stage, currentItem.id, earnedStars);
 
         if (earnedStars === 3) {
@@ -228,21 +262,24 @@ export default function LearnScreen() {
             setAnimationType('celebrating');
             setPetEmotion('happy');
             setFeedbackMessage('Great job! Almost perfect! ⭐⭐');
+            playSound('STARS');
             await ttsService.speak('Great job! Well done!', { rate: 0.8, ...lipSyncCallbacks });
         } else if (earnedStars === 1) {
             setAnimationType('encouraging');
             setPetEmotion('sad');
             setFeedbackMessage('Good try! Keep practicing! 💪');
+            playSound('STARS');
             await ttsService.speak('Good try! Let\'s keep going!', { rate: 0.75, ...lipSyncCallbacks });
         } else {
             setAnimationType('encouraging');
             setPetEmotion('sad');
             setFeedbackMessage('Let\'s try again! You can do it! 🎯');
+            playSound('PET_SAD');
             await ttsService.speak('Let\'s try again. Listen carefully.', { rate: 0.7, ...lipSyncCallbacks });
         }
 
         if (earnedStars > 0 && earnedStars < 3) {
-            playSound('STARS');
+            // Stars sound already played above for 1-2 stars
         }
 
         // Update session stats
@@ -476,15 +513,65 @@ export default function LearnScreen() {
                         />
                     </View>
 
-                    {/* Column 3: The Pet Companion */}
-                    <View style={styles.column}>
-                        <View style={styles.petContainer}>
+                    {/* Column 3: The Pet Companion & Controls */}
+                    <View style={[styles.column, { justifyContent: 'flex-start' }]}>
+                        {/* Pet Companion (Top Half) */}
+                        <View style={{ flex: 1, width: '100%', justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 20 }}>
                             <PetCompanion
                                 totalStars={profile.totalStars}
                                 profileId={profile.id}
                                 emotion={petEmotion}
                                 size="learnColumn"
                             />
+                        </View>
+
+                        {/* Interactive Controls (Bottom Half) */}
+                        <View style={{ flex: 1, width: '100%', justifyContent: 'flex-start', alignItems: 'center' }}>
+                            {learningState === 'listen' && attemptCount > 0 && (
+                                <Text style={styles.attemptText}>Attempt {attemptCount + 1} of 3</Text>
+                            )}
+
+                            <View style={[styles.bottomControls, { flex: undefined, width: '100%', paddingTop: 10 }]}>
+                                {/* Hint & Replay buttons */}
+                                {(learningState === 'listen' || learningState === 'prompt') && (
+                                    <View style={styles.helperButtons}>
+                                        <TouchableOpacity style={styles.helperBtn} onPress={handleReplay}>
+                                            <Text style={styles.helperBtnEmoji}>🔁</Text>
+                                            <Text style={styles.helperBtnText}>Replay</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity style={styles.helperBtn} onPress={handleHint}>
+                                            <Text style={styles.helperBtnEmoji}>💡</Text>
+                                            <Text style={styles.helperBtnText}>Hint</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+
+                                {/* Record button */}
+                                <Animated.View style={{ transform: [{ scale: pulseAnim }], zIndex: 10 }}>
+                                    <RecordButton
+                                        onPress={handleRecordPress}
+                                        isRecording={learningState === 'recording'}
+                                        isProcessing={learningState === 'analyzing'}
+                                        disabled={learningState !== 'listen' && learningState !== 'recording'}
+                                        meteringLevel={meteringLevel}
+                                    />
+                                </Animated.View>
+
+                                {learningState === 'listen' && (
+                                    <Text style={styles.instruction}>
+                                        Tap and say "{currentItem.displayText}"
+                                    </Text>
+                                )}
+                                {learningState === 'introduce' && (
+                                    <Text style={styles.instruction}>🎧 Listen carefully...</Text>
+                                )}
+                                {learningState === 'prompt' && (
+                                    <Text style={styles.instruction}>Get ready to speak! 🎤</Text>
+                                )}
+                                {learningState === 'analyzing' && (
+                                    <Text style={styles.instruction}>✨ Checking your pronunciation...</Text>
+                                )}
+                            </View>
                         </View>
                     </View>
 
@@ -499,56 +586,13 @@ export default function LearnScreen() {
                             accuracy={accuracy}
                             message={feedbackMessage}
                             visible={learningState === 'feedback'}
+                            phonemes={phonemes}
+                            fluency={fluency}
+                            completeness={completeness}
+                            prosody={prosody}
                         />
                     </View>
                 )}
-
-                {/* Attempt counter */}
-                {learningState === 'listen' && attemptCount > 0 && (
-                    <Text style={styles.attemptText}>Attempt {attemptCount + 1} of 3</Text>
-                )}
-
-                {/* Bottom controls */}
-                <View style={styles.bottomControls}>
-                    {/* Hint & Replay buttons */}
-                    {(learningState === 'listen' || learningState === 'prompt') && (
-                        <View style={styles.helperButtons}>
-                            <TouchableOpacity style={styles.helperBtn} onPress={handleReplay}>
-                                <Text style={styles.helperBtnEmoji}>🔁</Text>
-                                <Text style={styles.helperBtnText}>Replay</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.helperBtn} onPress={handleHint}>
-                                <Text style={styles.helperBtnEmoji}>💡</Text>
-                                <Text style={styles.helperBtnText}>Hint</Text>
-                            </TouchableOpacity>
-                        </View>
-                    )}
-
-                    {/* Record button */}
-                    <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-                        <RecordButton
-                            onPress={handleRecordPress}
-                            isRecording={learningState === 'recording'}
-                            isProcessing={learningState === 'analyzing'}
-                            disabled={learningState !== 'listen' && learningState !== 'recording'}
-                        />
-                    </Animated.View>
-
-                    {learningState === 'listen' && (
-                        <Text style={styles.instruction}>
-                            Tap and say "{currentItem.displayText}"
-                        </Text>
-                    )}
-                    {learningState === 'introduce' && (
-                        <Text style={styles.instruction}>🎧 Listen carefully...</Text>
-                    )}
-                    {learningState === 'prompt' && (
-                        <Text style={styles.instruction}>Get ready to speak! 🎤</Text>
-                    )}
-                    {learningState === 'analyzing' && (
-                        <Text style={styles.instruction}>✨ Checking your pronunciation...</Text>
-                    )}
-                </View>
             </SafeAreaView>
         </LinearGradient>
     );

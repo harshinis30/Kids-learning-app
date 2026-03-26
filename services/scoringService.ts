@@ -4,6 +4,24 @@ import * as sdk from 'microsoft-cognitiveservices-speech-sdk';
 import { FFmpegKit, ReturnCode } from 'ffmpeg-kit-react-native';
 import { Platform } from 'react-native';
 
+export interface PronunciationResult {
+    accuracyScore: number;
+    fluencyScore: number;
+    completenessScore: number;
+    prosodyScore: number;
+    compositeScore: number;
+    phonemes: { phoneme: string; accuracyScore: number }[];
+}
+
+export function computeStars(result: PronunciationResult | number, stage: number = 1): number {
+    const score = typeof result === 'number' ? result : result.compositeScore;
+    // Thresholds can be adjusted by stage if needed
+    if (score >= 90) return 3;
+    if (score >= 70) return 2;
+    if (score >= 50) return 1;
+    return 0;
+}
+
 // Ensure these are set in your .env file
 const SPEECH_KEY = process.env.EXPO_PUBLIC_SPEECH_KEY;
 const SPEECH_REGION = process.env.EXPO_PUBLIC_SPEECH_REGION;
@@ -45,40 +63,67 @@ const convertToAzureWav = async (sourceUri: string): Promise<string> => {
 export const getPronunciationScore = async (
     targetWord: string,
     audioUri: string
-): Promise<number | null> => {
+): Promise<PronunciationResult | null> => {
     let uriToProcess = audioUri;
     let convertedUri: string | null = null;
+    let finalArrayBuffer: ArrayBuffer | null = null;
 
     try {
         if (!SPEECH_KEY || !SPEECH_REGION) {
             throw new Error('Azure Speech Key or Region is missing in environment variables.');
         }
 
-        // 1. CONVERSION STEP
-        // If on Android (or if the file extension isn't .wav), we must convert it.
-        if (Platform.OS === 'android' || !audioUri.endsWith('.wav')) {
-            console.log('[ScoringService] Detected non-WAV or Android file. Converting...');
-            convertedUri = await convertToAzureWav(audioUri);
-            uriToProcess = convertedUri;
+        if (Platform.OS === 'web') {
+            console.log('[ScoringService] Web platform detected. Processing audio via Web Audio...');
+            
+            // 1. Fetch Blob from the Web URI
+            const response = await fetch(audioUri);
+            const arrayBuffer = await response.arrayBuffer();
+
+            // 2. Decode and Resample to 16kHz
+            const AudioContextClass = (globalThis as any).AudioContext || (globalThis as any).webkitAudioContext;
+            const audioCtx = new AudioContextClass({ sampleRate: 16000 });
+            const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+            // 3. Extract Mono Channel
+            const channelData = decodedBuffer.getChannelData(0);
+
+            // 4. Convert Float32 to Int16 PCM
+            const pcm16 = new Int16Array(channelData.length);
+            for (let i = 0; i < channelData.length; i++) {
+                const s = Math.max(-1, Math.min(1, channelData[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+            }
+
+            finalArrayBuffer = pcm16.buffer;
+
+        } else {
+            // 1. CONVERSION STEP FOR NATIVE
+            if (Platform.OS === 'android' || !audioUri.endsWith('.wav')) {
+                console.log('[ScoringService] Detected non-WAV or Android file. Converting...');
+                convertedUri = await convertToAzureWav(audioUri);
+                uriToProcess = convertedUri;
+            }
+
+            // 2. READ FILE
+            const base64String = await FileSystem.readAsStringAsync(uriToProcess, {
+                encoding: FileSystem.EncodingType.Base64,
+            });
+
+            // 3. PREPARE BUFFER
+            const buffer = Buffer.from(base64String, 'base64');
+            finalArrayBuffer = buffer.buffer.slice(
+                buffer.byteOffset,
+                buffer.byteOffset + buffer.byteLength
+            );
         }
 
-        // 2. READ FILE
-        // Read the (possibly converted) file as Base64
-        const base64String = await FileSystem.readAsStringAsync(uriToProcess, {
-            encoding: FileSystem.EncodingType.Base64,
-        });
-
-        // 3. PREPARE BUFFER
-        const buffer = Buffer.from(base64String, 'base64');
-        // Create an ArrayBuffer copy for the Azure SDK
-        const arrayBuffer = buffer.buffer.slice(
-            buffer.byteOffset,
-            buffer.byteOffset + buffer.byteLength
-        );
-
         // 4. SETUP AZURE STREAM
-        const pushStream = sdk.AudioInputStream.createPushStream();
-        pushStream.write(arrayBuffer);
+        const audioFormat = sdk.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1);
+        const pushStream = sdk.AudioInputStream.createPushStream(audioFormat);
+        if (finalArrayBuffer) {
+            pushStream.write(finalArrayBuffer);
+        }
         pushStream.close(); // Important: Close stream so Azure knows data is finished
 
         // 5. CONFIGURE RECOGNIZER
@@ -109,8 +154,34 @@ export const getPronunciationScore = async (
 
                     if (result.reason === sdk.ResultReason.RecognizedSpeech) {
                         const assessmentResult = sdk.PronunciationAssessmentResult.fromResult(result);
-                        console.log(`[ScoringService] Score: ${assessmentResult.accuracyScore}`);
-                        resolve(assessmentResult.accuracyScore);
+                        
+                        const accuracyScore = assessmentResult.accuracyScore;
+                        const fluencyScore = assessmentResult.fluencyScore || 0;
+                        const completenessScore = assessmentResult.completenessScore || 0;
+                        const prosodyScore = assessmentResult.prosodyScore || 0;
+                        // Use Azure's official pronunciationScore (weighted composite of all metrics)
+                        const compositeScore = assessmentResult.pronunciationScore || 
+                            ((accuracyScore * 0.4) + (fluencyScore * 0.2) + (completenessScore * 0.2) + (prosodyScore * 0.2));
+                        
+                        let phonemes: { phoneme: string; accuracyScore: number }[] = [];
+                        if (assessmentResult.detailResult && assessmentResult.detailResult.Words) {
+                            phonemes = assessmentResult.detailResult.Words.flatMap((w: any) => 
+                                (w.Phonemes || []).map((p: any) => ({
+                                    phoneme: p.Phoneme,
+                                    accuracyScore: p.AccuracyScore
+                                }))
+                            );
+                        }
+                        
+                        console.log(`[ScoringService] Scores — Accuracy: ${accuracyScore}, Fluency: ${fluencyScore}, Completeness: ${completenessScore}, Prosody: ${prosodyScore}, Composite: ${compositeScore.toFixed(1)}`);
+                        resolve({
+                            accuracyScore,
+                            fluencyScore,
+                            completenessScore,
+                            prosodyScore,
+                            compositeScore,
+                            phonemes
+                        });
                     } else {
                         console.warn('[ScoringService] Recognition failed or no match.', result.errorDetails);
                         resolve(null);

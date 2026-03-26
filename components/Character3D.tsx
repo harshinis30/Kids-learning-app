@@ -143,9 +143,9 @@ export function Character3D({
     // ── Camera ─────────────────────────────────────────────────────────────
     const aspect = gl.drawingBufferWidth / gl.drawingBufferHeight;
     const camera = new THREE.PerspectiveCamera(38, aspect, 0.01, 100);
-    // Position camera at bust height, slightly elevated
-    camera.position.set(0, 1.1, 2.2);
-    camera.lookAt(0, 0.9, 0);
+    // Point lower so the character is higher up on the screen
+    camera.position.set(0, 1.35, 1.0);
+    camera.lookAt(0, 1.35, 0);
 
     // ── Lights ─────────────────────────────────────────────────────────────
     scene.add(new THREE.AmbientLight(0xffeedd, 1.2));
@@ -158,7 +158,7 @@ export function Character3D({
 
     // ── Load Rain GLB ───────────────────────────────────────────────────────
     try {
-      const asset = Asset.fromModule(require('../assets/models/rain.glb'));
+      const asset = Asset.fromModule(require('../assets/models/rain_v3.2.glb'));
       await asset.downloadAsync();
       const uri = asset.localUri ?? asset.uri;
 
@@ -179,6 +179,18 @@ export function Character3D({
         // Collect morph meshes and fix WebGL skinning
         model.traverse((obj) => {
           obj.frustumCulled = false; // Prevent T-pose / disappearing meshes bug
+          
+          // Drop arms to resting position (A-pose)
+          if ((obj as any).isBone) {
+            if (obj.name === 'DEF-Upperarm1.L' || obj.name === 'DEF-Upperarm2.L') {
+              obj.rotation.z -= 1.2;
+              obj.rotation.x -= 0.1;
+            } else if (obj.name === 'DEF-Upperarm1.R' || obj.name === 'DEF-Upperarm2.R') {
+              obj.rotation.z += 1.2;
+              obj.rotation.x += 0.1;
+            }
+          }
+
           const mesh = obj as THREE.Mesh;
           if (!mesh.isMesh) return;
 

@@ -1,6 +1,3 @@
-/**
- * BossBattle.tsx — Full 3D boss battle with animated GLB models
- */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef, useState } from 'react';
@@ -12,12 +9,23 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { Audio } from 'expo-av';
 import { CurriculumItem } from '../data/curriculum';
 import { playSound } from '../services/audioService';
 import { Boss3D, Boss3DRef, BossPhase } from './Boss3D';
 import { ConfettiOverlay } from './ConfettiOverlay';
+import { RecordButton } from './RecordButton';
+import { getPronunciationScore, PronunciationResult, computeStars } from '../services/scoringService';
+import { ttsService } from '../services/textToSpeech';
+import { problemTracker } from '../services/problemTracker';
+import { FeedbackDisplay } from './FeedbackDisplay';
 
-// ── Boss definitions per stage ────────────────────────────────────────────────
+export interface BossDefeatRecord {
+    bossId: string;
+    defeatedAt: string;
+    starsUsed: number;
+}
+
 interface BossInfo {
     name: string;
     gradientColors: [string, string];
@@ -32,13 +40,6 @@ const BOSS_BY_STAGE: Record<number, BossInfo> = {
     4: { name: 'The Space Overlord', gradientColors: ['#0f0623', '#3b0764'], bossId: 'space_overlord', glowColor: '#C084FC' },
 };
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-export interface BossDefeatRecord {
-    bossId: string;
-    defeatedAt: string;
-    starsUsed: number;
-}
-
 interface Props {
     visible: boolean;
     bossWord: CurriculumItem | null;
@@ -48,18 +49,33 @@ interface Props {
     onComplete: (result: 'victory' | 'escaped', bonusStars: number) => void;
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
 export function BossBattle({ visible, bossWord, stage, profileId, onAttempt, onComplete }: Props) {
     const boss = BOSS_BY_STAGE[stage] ?? BOSS_BY_STAGE[1];
 
     const [healthSegments, setHealthSegments] = useState([true, true, true]);
     const [attempts, setAttempts] = useState(0);
+    const [maxAttempts, setMaxAttempts] = useState(3);
     const [phase, setPhase] = useState<'battle' | 'victory' | 'escaped'>('battle');
     const [bossPhase, setBossPhase] = useState<BossPhase>('entering');
     const [statusText, setStatusText] = useState('');
     const [showConfetti, setShowConfetti] = useState(false);
     const [waitingForAttempt, setWaitingForAttempt] = useState(true);
     const [bossLoaded, setBossLoaded] = useState(false);
+
+    // New phase config
+    const [demoPhase, setDemoPhase] = useState<'watch' | 'your_turn'>('watch');
+    const [activeSyllableIdx, setActiveSyllableIdx] = useState(-1);
+
+    // Audio states
+    const [isRecording, setIsRecording] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [recording, setRecording] = useState<Audio.Recording | null>(null);
+    const [meteringLevel, setMeteringLevel] = useState<number | undefined>();
+    const [lastAudioUri, setLastAudioUri] = useState<string | null>(null);
+    const [lastResult, setLastResult] = useState<PronunciationResult | null>(null);
+    const [sillyVoiceEnabled, setSillyVoiceEnabled] = useState(false);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const soundRef = useRef<Audio.Sound | null>(null);
 
     const boss3DRef = useRef<Boss3DRef>(null);
     const bossLoadedRef = useRef(false);
@@ -76,18 +92,26 @@ export function BossBattle({ visible, bossWord, stage, profileId, onAttempt, onC
     const wordCardScale = useRef(new Animated.Value(0.8)).current;
     const wordCardOpacity = useRef(new Animated.Value(0)).current;
 
-    // Reset state every time battle opens
     useEffect(() => {
-        if (visible) {
+        if (visible && bossWord) {
+            problemTracker.getProblemAreas(profileId).then(problems => {
+                const isTricky = problems.some(p => bossWord.targetPhonemes.includes(p.phoneme));
+                setMaxAttempts(isTricky ? 4 : 3);
+            });
+
             setHealthSegments([true, true, true]);
             setAttempts(0);
             setPhase('battle');
+            setDemoPhase('watch');
             setBossPhase('entering');
             setStatusText('');
             setShowConfetti(false);
             setWaitingForAttempt(true);
             setBossLoaded(false);
+            setLastAudioUri(null);
+            setLastResult(null);
             bossLoadedRef.current = false;
+            
             healthBarAnims.forEach(a => a.setValue(1));
             titleScale.setValue(0);
             starsAnim.setValue(0);
@@ -95,9 +119,7 @@ export function BossBattle({ visible, bossWord, stage, profileId, onAttempt, onC
             wordCardScale.setValue(0.8);
             wordCardOpacity.setValue(0);
 
-            // Dramatic title entrance
             Animated.spring(titleScale, { toValue: 1, friction: 5, tension: 100, useNativeDriver: true }).start();
-            // Looping bg stars
             Animated.loop(
                 Animated.sequence([
                     Animated.timing(starsAnim, { toValue: 1, duration: 2000, useNativeDriver: true }),
@@ -105,17 +127,190 @@ export function BossBattle({ visible, bossWord, stage, profileId, onAttempt, onC
                 ])
             ).start();
         }
-    }, [visible]);
+        return () => {
+            if (soundRef.current) soundRef.current.unloadAsync();
+        };
+    }, [visible, bossWord]);
 
     const handleBossLoaded = () => {
         bossLoadedRef.current = true;
         setBossLoaded(true);
         setBossPhase('idle');
-        // Animate word card in after boss loaded
         Animated.parallel([
             Animated.spring(wordCardScale, { toValue: 1, friction: 6, tension: 100, useNativeDriver: true }),
             Animated.timing(wordCardOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
-        ]).start();
+        ]).start(() => {
+            runWatchMePhase();
+        });
+    };
+
+    const runWatchMePhase = async () => {
+        if (!bossWord) return;
+        setDemoPhase('watch');
+        setWaitingForAttempt(false);
+        
+        await ttsService.speak("Watch me!", { rate: 0.7 });
+        
+        await ttsService.speakSyllableByWord(
+            bossWord.displayText,
+            (idx) => setActiveSyllableIdx(idx),
+            { rate: 0.6 }
+        );
+        
+        setActiveSyllableIdx(-1);
+        await ttsService.speak("Now your turn!", { rate: 0.8 });
+        
+        setDemoPhase('your_turn');
+        setWaitingForAttempt(true);
+    };
+
+    const startRecording = async () => {
+        try {
+            await Audio.requestPermissionsAsync();
+            await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+            const { recording: rec } = await Audio.Recording.createAsync(
+                Audio.RecordingOptionsPresets.HIGH_QUALITY,
+                (status) => {
+                    if (status.metering !== undefined) {
+                        setMeteringLevel(status.metering);
+                    }
+                },
+                100
+            );
+            setRecording(rec);
+            setIsRecording(true);
+            setLastResult(null);
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const stopRecording = async () => {
+        if (!recording) return;
+        try {
+            setIsRecording(false);
+            setIsProcessing(true);
+            setWaitingForAttempt(false);
+            
+            await recording.stopAndUnloadAsync();
+            // Reset audio mode so sound effects can play
+            await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+            const uri = recording.getURI();
+            setLastAudioUri(uri);
+            setRecording(null);
+            
+            if (uri && bossWord) {
+                const result = await getPronunciationScore(bossWord.displayText, uri);
+                handleRecordingResult(result);
+            } else {
+                setIsProcessing(false);
+                setWaitingForAttempt(true);
+            }
+        } catch (err) {
+            console.error(err);
+            setIsProcessing(false);
+            setWaitingForAttempt(true);
+        }
+    };
+
+    const toggleRecord = () => {
+        if (isRecording) stopRecording();
+        else startRecording();
+    };
+
+    const playHearYourself = async () => {
+        if (!lastAudioUri || isPlaying) return;
+        setIsPlaying(true);
+        try {
+            const { sound } = await Audio.Sound.createAsync(
+                { uri: lastAudioUri },
+                { 
+                    shouldPlay: true, 
+                    rate: sillyVoiceEnabled ? 1.5 : 1.0, 
+                    shouldCorrectPitch: !sillyVoiceEnabled 
+                }
+            );
+            soundRef.current = sound;
+            sound.setOnPlaybackStatusUpdate((status) => {
+                if (status.isLoaded && status.didJustFinish) {
+                    setIsPlaying(false);
+                    sound.unloadAsync();
+                    ttsService.speak(bossWord?.displayText || '', { rate: 0.65 });
+                }
+            });
+        } catch (e) {
+            setIsPlaying(false);
+        }
+    };
+
+    const handleRecordingResult = (result: PronunciationResult | null) => {
+        setIsProcessing(false);
+        if (!result) {
+            showStatus('⚠️ Uh oh, could not hear you! Try again.');
+            setWaitingForAttempt(true);
+            return;
+        }
+
+        setLastResult(result);
+        const stars = computeStars(result);
+        onAttempt(stars);
+
+        const newAttempts = attempts + 1;
+        setAttempts(newAttempts);
+
+        if (stars === 3) {
+            setBossPhase('defeat');
+            boss3DRef.current?.triggerDefeat();
+            setHealthSegments([false, false, false]);
+            healthBarAnims.forEach((a, i) => setTimeout(() => drainHealthSegment(i), i * 200));
+            setPhase('victory');
+            setShowConfetti(true);
+            playSound('BOSS_DEFEAT');
+            if (bossWord) ttsService.celebrateSuccessForPhoneme(bossWord.targetPhonemes);
+            
+            setTimeout(async () => {
+                const key = `@boss_defeats_${profileId}`;
+                const raw = await AsyncStorage.getItem(key);
+                const records: BossDefeatRecord[] = raw ? JSON.parse(raw) : [];
+                records.push({ bossId: boss.bossId, defeatedAt: new Date().toISOString(), starsUsed: 3 });
+                await AsyncStorage.setItem(key, JSON.stringify(records));
+                onComplete('victory', 10);
+            }, 3500);
+
+        } else if (stars === 2) {
+            setBossPhase('hit');
+            boss3DRef.current?.triggerHit();
+            playSound('BOSS_HIT');
+            const aliveIdx = healthSegments.lastIndexOf(true);
+            if (aliveIdx >= 0) {
+                drainHealthSegment(aliveIdx);
+                const updated = [...healthSegments];
+                updated[aliveIdx] = false;
+                setHealthSegments(updated);
+            }
+            showStatus('⚡ HIT! Great job!');
+            if (newAttempts >= maxAttempts) {
+                setTimeout(() => triggerEscape(), 1800);
+            } else {
+                setTimeout(() => {
+                    setBossPhase('idle');
+                    setWaitingForAttempt(true);
+                }, 1800);
+            }
+
+        } else {
+            boss3DRef.current?.triggerHit(); 
+            playSound('BOSS_HIT'); 
+            showStatus('🛡️ Blocked! Keep trying!');
+            if (newAttempts >= maxAttempts) {
+                setTimeout(() => triggerEscape(), 1800);
+            } else {
+                setTimeout(() => {
+                    setBossPhase('idle');
+                    setWaitingForAttempt(true);
+                }, 1800);
+            }
+        }
     };
 
     const drainHealthSegment = (index: number) => {
@@ -135,70 +330,6 @@ export function BossBattle({ visible, bossWord, stage, profileId, onAttempt, onC
         ]).start(() => setStatusText(''));
     };
 
-    const handleRecordingResult = (stars: number) => {
-        if (!waitingForAttempt || phase !== 'battle') return;
-        setWaitingForAttempt(false);
-        onAttempt(stars);
-
-        const newAttempts = attempts + 1;
-        setAttempts(newAttempts);
-
-        if (stars === 3) {
-            // Perfect — defeat boss
-            setBossPhase('defeat');
-            boss3DRef.current?.triggerDefeat();
-            setHealthSegments([false, false, false]);
-            healthBarAnims.forEach((a, i) => setTimeout(() => drainHealthSegment(i), i * 200));
-            setPhase('victory');
-            setShowConfetti(true);
-            playSound('BOSS_DEFEAT');
-            setTimeout(async () => {
-                const key = `@boss_defeats_${profileId}`;
-                const raw = await AsyncStorage.getItem(key);
-                const records: BossDefeatRecord[] = raw ? JSON.parse(raw) : [];
-                records.push({ bossId: boss.bossId, defeatedAt: new Date().toISOString(), starsUsed: 3 });
-                await AsyncStorage.setItem(key, JSON.stringify(records));
-                onComplete('victory', 10);
-            }, 3000);
-
-        } else if (stars === 2) {
-            // Hit
-            setBossPhase('hit');
-            boss3DRef.current?.triggerHit();
-            playSound('BOSS_HIT');
-            const aliveIdx = healthSegments.lastIndexOf(true);
-            if (aliveIdx >= 0) {
-                drainHealthSegment(aliveIdx);
-                const updated = [...healthSegments];
-                updated[aliveIdx] = false;
-                setHealthSegments(updated);
-            }
-            showStatus('⚡ HIT! One step closer!');
-            if (newAttempts >= 3) {
-                setTimeout(() => triggerEscape(), 1800);
-            } else {
-                setTimeout(() => {
-                    setBossPhase('idle');
-                    setWaitingForAttempt(true);
-                }, 1800);
-            }
-
-        } else {
-            // Blocked
-            boss3DRef.current?.triggerHit(); // shake but no health drain
-            playSound('BOSS_HIT'); // maybe change to block sound later
-            showStatus('🛡️ Blocked! The boss resisted your spell!');
-            if (newAttempts >= 3) {
-                setTimeout(() => triggerEscape(), 1800);
-            } else {
-                setTimeout(() => {
-                    setBossPhase('idle');
-                    setWaitingForAttempt(true);
-                }, 1800);
-            }
-        }
-    };
-
     const triggerEscape = () => {
         setPhase('escaped');
         setBossPhase('escaped');
@@ -206,6 +337,26 @@ export function BossBattle({ visible, bossWord, stage, profileId, onAttempt, onC
         playSound('BOSS_ESCAPE');
         showStatus('💨 The boss fled... for now!');
         setTimeout(() => onComplete('escaped', 3), 2500);
+    };
+
+    const renderWordSyllables = () => {
+        if (!bossWord) return null;
+        const parts = bossWord.displayText.match(/[^aeiouy]*[aeiouy]+(?:[^aeiouy]*$|[^aeiouy](?=[^aeiouy]))?/gi) || [bossWord.displayText];
+        return (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }}>
+                {parts.map((p, i) => (
+                    <Text 
+                        key={i} 
+                        style={[
+                            styles.wordText, 
+                            activeSyllableIdx === i && { color: '#4ADE80', transform: [{scale: 1.1}] }
+                        ]}
+                    >
+                        {p}
+                    </Text>
+                ))}
+            </View>
+        );
     };
 
     if (!visible || !bossWord) return null;
@@ -271,10 +422,28 @@ export function BossBattle({ visible, bossWord, stage, profileId, onAttempt, onC
                     { borderColor: boss.glowColor + '66' },
                     { transform: [{ scale: wordCardScale }], opacity: wordCardOpacity },
                 ]}>
-                    <Text style={styles.wordLabel}>Say the magic word:</Text>
-                    <Text style={styles.wordText}>{bossWord.emoji} {bossWord.displayText}</Text>
+                    <Text style={styles.wordLabel}>
+                        {demoPhase === 'watch' ? '👀 Watch and listen!' : 'Say the magic word:'}
+                    </Text>
+                    {renderWordSyllables()}
                     <Text style={styles.wordPhonemes}>{bossWord.phonemes}</Text>
                 </Animated.View>
+
+                {/* Feedback Display */}
+                {lastResult && demoPhase === 'your_turn' && phase === 'battle' && (
+                    <View style={{ transform: [{ scale: 0.85 }], marginTop: -15, zIndex: 10 }}>
+                        <FeedbackDisplay 
+                            isCorrect={computeStars(lastResult) >= 2}
+                            accuracy={lastResult.compositeScore}
+                            message={computeStars(lastResult) >= 2 ? "Great job!" : "Keep practicing!"}
+                            phonemes={lastResult.phonemes}
+                            fluency={lastResult.fluencyScore}
+                            completeness={lastResult.completenessScore}
+                            prosody={lastResult.prosodyScore}
+                            visible={true}
+                        />
+                    </View>
+                )}
 
                 {/* Status bubble */}
                 {statusText !== '' && (
@@ -283,14 +452,39 @@ export function BossBattle({ visible, bossWord, stage, profileId, onAttempt, onC
                     </Animated.View>
                 )}
 
-                {/* Speak button */}
-                {phase === 'battle' && waitingForAttempt && bossLoaded && (
-                    <TouchableOpacity
-                        style={[styles.recordBtn, { shadowColor: boss.glowColor }]}
-                        onPress={() => handleRecordingResult(Math.random() < 0.5 ? 3 : Math.random() < 0.5 ? 2 : 0)}
-                    >
-                        <Text style={styles.recordBtnText}>🎤 Speak the Word!</Text>
-                    </TouchableOpacity>
+                {/* Speak button and playback */}
+                {phase === 'battle' && demoPhase === 'your_turn' && bossLoaded && (
+                    <View style={styles.recordingSection}>
+                        {(waitingForAttempt || isRecording || isProcessing) && (
+                            <RecordButton 
+                                onPress={toggleRecord}
+                                isRecording={isRecording}
+                                isProcessing={isProcessing}
+                                disabled={!waitingForAttempt && !isRecording && !isProcessing}
+                                meteringLevel={meteringLevel}
+                            />
+                        )}
+                        
+                        {/* Hear Yourself */}
+                        {lastAudioUri && waitingForAttempt && !isRecording && (
+                            <View style={styles.playbackRow}>
+                                <TouchableOpacity 
+                                    style={styles.playbackBtn} 
+                                    onPress={playHearYourself}
+                                    disabled={isPlaying}
+                                >
+                                    <Text style={styles.playbackText}>🔊 Hear {isPlaying ? '...' : 'Yourself'}</Text>
+                                </TouchableOpacity>
+                                
+                                <TouchableOpacity 
+                                    style={[styles.sillyToggle, sillyVoiceEnabled && styles.sillyToggleActive]}
+                                    onPress={() => setSillyVoiceEnabled(!sillyVoiceEnabled)}
+                                >
+                                    <Text style={styles.sillyText}>{sillyVoiceEnabled ? '🐿️ Silly On' : '🎤 Normal'}</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                    </View>
                 )}
 
                 {/* Victory result */}
@@ -313,7 +507,7 @@ export function BossBattle({ visible, bossWord, stage, profileId, onAttempt, onC
 
                 {/* Attempt counter */}
                 {phase === 'battle' && (
-                    <Text style={styles.attemptCounter}>Attempts: {attempts} / 3</Text>
+                    <Text style={styles.attemptCounter}>Attempts: {attempts} / {maxAttempts}</Text>
                 )}
 
                 <ConfettiOverlay visible={showConfetti} onComplete={() => setShowConfetti(false)} />
@@ -435,17 +629,13 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255,255,255,0.15)',
     },
     statusText: { fontSize: 17, fontWeight: '800', color: '#fff', textAlign: 'center' },
-    recordBtn: {
-        backgroundColor: '#FFE066',
-        borderRadius: 50,
-        paddingHorizontal: 40,
-        paddingVertical: 16,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.6,
-        shadowRadius: 14,
-        elevation: 12,
-    },
-    recordBtnText: { fontSize: 20, fontWeight: '900', color: '#1a1a2e' },
+    recordingSection: { alignItems: 'center', gap: 12 },
+    playbackRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
+    playbackBtn: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+    playbackText: { color: '#fff', fontWeight: '800' },
+    sillyToggle: { backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 },
+    sillyToggleActive: { backgroundColor: '#C084FC' },
+    sillyText: { color: '#fff', fontWeight: '700' },
     victoryBox: { alignItems: 'center', gap: 4 },
     victoryTitle: { fontSize: 32, fontWeight: '900', color: '#FFE066' },
     victoryText: { fontSize: 16, fontWeight: '800', color: '#fff' },

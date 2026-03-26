@@ -1,19 +1,40 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { ttsService } from '../services/textToSpeech';
+
+const MOUTH_HINTS: Record<string, string> = {
+    'θ': '👄 Put your tongue between your teeth!',
+    'ð': '👄 Tongue between teeth & use voice!',
+    'ʃ': '👄 Round your lips and blow air!',
+    'f': '👄 Top teeth on bottom lip!',
+    'v': '👄 Top teeth on bottom lip & use voice!',
+    'r': '👄 Pull your tongue back!',
+    'l': '👄 Tongue up behind top teeth!',
+};
 
 interface FeedbackDisplayProps {
     isCorrect: boolean | null;
     accuracy: number;
     message: string;
     visible: boolean;
+    phonemes?: { phoneme: string; accuracyScore: number }[];
+    targetWord?: string;
+    fluency?: number;
+    completeness?: number;
+    prosody?: number;
 }
 
 export function FeedbackDisplay({
     isCorrect,
     accuracy,
     message,
-    visible
+    visible,
+    phonemes,
+    targetWord,
+    fluency,
+    completeness,
+    prosody
 }: FeedbackDisplayProps) {
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const scaleAnim = useRef(new Animated.Value(0.5)).current;
@@ -142,6 +163,54 @@ export function FeedbackDisplay({
 
                 {/* Message */}
                 <Text style={styles.message}>{message}</Text>
+
+                {/* Phoneme Highlights */}
+                {phonemes && phonemes.length > 0 && isCorrect === false && (
+                    <View style={styles.phonemesContainer}>
+                        {phonemes.map((p, idx) => {
+                            const color = p.accuracyScore >= 80 ? '#10B981' : p.accuracyScore >= 60 ? '#F59E0B' : '#EF4444';
+                            return (
+                                <TouchableOpacity 
+                                    key={idx} 
+                                    style={[styles.phonemeBox, { borderColor: color, backgroundColor: 'rgba(255,255,255,0.9)' }]}
+                                    onPress={() => ttsService.speak(p.phoneme, {rate: 0.4})}
+                                >
+                                    <Text style={[styles.phonemeText, { color }]}>{p.phoneme}</Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+                )}
+
+                {/* Mouth Articulation Hints */}
+                {phonemes && isCorrect === false && (() => {
+                    const worst = phonemes.reduce((prev, curr) => curr.accuracyScore < prev.accuracyScore ? curr : prev, phonemes[0]);
+                    if (worst && worst.accuracyScore < 60 && MOUTH_HINTS[worst.phoneme]) {
+                        return (
+                            <View style={styles.hintBox}>
+                                <Text style={styles.hintText}>{MOUTH_HINTS[worst.phoneme]}</Text>
+                            </View>
+                        );
+                    }
+                    return null;
+                })()}
+
+                {/* Fluency / Completeness Warnings */}
+                {isCorrect === false && completeness !== undefined && completeness < 80 && (
+                    <View style={styles.warningBox}>
+                        <Text style={styles.warningText}>⚠️ You missed a sound! Say the whole word.</Text>
+                    </View>
+                )}
+                {isCorrect === false && completeness !== undefined && completeness >= 80 && fluency !== undefined && fluency < 80 && (
+                    <View style={styles.warningBox}>
+                        <Text style={styles.warningText}>🌊 Try to say it smoothly without stopping!</Text>
+                    </View>
+                )}
+                {isCorrect === false && prosody !== undefined && prosody < 60 && (
+                    <View style={styles.warningBox}>
+                        <Text style={styles.warningText}>🎵 Try to use natural rhythm and tone!</Text>
+                    </View>
+                )}
 
                 {/* Accuracy bar */}
                 {accuracy > 0 && (
@@ -284,5 +353,48 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 0.6,
         shadowRadius: 24,
+    },
+    phonemesContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        gap: 6,
+        marginBottom: 12,
+    },
+    phonemeBox: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+        borderWidth: 2,
+    },
+    phonemeText: {
+        fontSize: 18,
+        fontWeight: '900',
+    },
+    hintBox: {
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 12,
+        marginBottom: 8,
+    },
+    hintText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#fff',
+    },
+    warningBox: {
+        backgroundColor: 'rgba(255,165,0,0.2)',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 12,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(255,165,0,0.5)',
+    },
+    warningText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#FFE066',
     },
 });

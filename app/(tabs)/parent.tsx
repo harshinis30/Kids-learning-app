@@ -36,6 +36,7 @@ export default function ParentDashboard() {
     const [selectedProfile, setSelectedProfile] = useState<ChildProfile | null>(null);
     const [sessions, setSessions] = useState<SessionRecord[]>([]);
     const [problems, setProblems] = useState<ProblemArea[]>([]);
+    const [strongSounds, setStrongSounds] = useState<ProblemArea[]>([]);
     const [achievements, setAchievements] = useState<string[]>([]);
     const [petNameInput, setPetNameInput] = useState('');
     const [petNameSaved, setPetNameSaved] = useState(false);
@@ -60,14 +61,16 @@ export default function ParentDashboard() {
     const selectProfile = async (p: ChildProfile) => {
         setSelectedProfile(p);
         setPetNameSaved(false);
-        const [s, probs, achs, pName] = await Promise.all([
+        const [s, probs, strongs, achs, pName] = await Promise.all([
             progressTracker.getRecentSessions(p.id, 10),
             problemTracker.getProblemAreas(p.id),
+            problemTracker.getStrongestSounds(p.id),
             progressTracker.getAchievements(p.id),
             getPetName(p.id),
         ]);
         setSessions(s);
         setProblems(probs);
+        setStrongSounds(strongs);
         setAchievements(achs);
         setPetNameInput(pName);
     };
@@ -194,10 +197,10 @@ export default function ParentDashboard() {
                             </View>
 
                             {/* Problem Areas */}
-                            <Text style={styles.sectionTitle}>🎯 Needs Practice</Text>
+                            <Text style={styles.sectionTitle}>🎯 Tricky Sounds</Text>
                             {problems.length === 0 ? (
                                 <View style={styles.emptyCard}>
-                                    <Text style={styles.emptyText}>🌟 No problem areas yet! Keep practicing.</Text>
+                                    <Text style={styles.emptyText}>🌟 No tricky sounds yet! Keep practicing.</Text>
                                 </View>
                             ) : (
                                 problems.map((p, i) => (
@@ -217,6 +220,30 @@ export default function ParentDashboard() {
                                         </View>
                                     </View>
                                 ))
+                            )}
+
+                            {/* Strong Sounds */}
+                            {strongSounds.length > 0 && (
+                                <>
+                                    <Text style={styles.sectionTitle}>✨ Strong Sounds</Text>
+                                    {strongSounds.map((p, i) => (
+                                        <View key={i} style={styles.problemRow}>
+                                            <View style={{ flex: 1 }}>
+                                                <Text style={styles.problemLabel}>{p.label}</Text>
+                                                <Text style={styles.problemAttempts}>{p.attempts} attempts</Text>
+                                            </View>
+                                            <View style={styles.problemBarContainer}>
+                                                <View style={styles.problemBar}>
+                                                    <View style={[styles.problemBarFill, {
+                                                        width: `${p.averageAccuracy}%`,
+                                                        backgroundColor: '#10B981',
+                                                    }]} />
+                                                </View>
+                                                <Text style={styles.problemPct}>{Math.round(p.averageAccuracy)}%</Text>
+                                            </View>
+                                        </View>
+                                    ))}
+                                </>
                             )}
 
                             {/* Session History */}

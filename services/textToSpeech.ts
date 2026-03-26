@@ -158,6 +158,54 @@ class TextToSpeechService {
     async givePronunciationTip(tip: string, options?: TTSOptions): Promise<void> {
         await this.speak(tip, { rate: 0.6, ...options }); // Even slower for instructions
     }
+
+    /**
+     * Speak syllable by word
+     */
+    async speakSyllableByWord(
+        word: string,
+        onSyllable: (index: number) => void,
+        options?: TTSOptions
+    ): Promise<void> {
+        const syllables = word.match(/[^aeiouy]*[aeiouy]+(?:[^aeiouy]*$|[^aeiouy](?=[^aeiouy]))?/gi) || [word];
+        
+        for (let i = 0; i < syllables.length; i++) {
+            onSyllable(i);
+            await this.speak(syllables[i], { rate: 0.45, ...options });
+            // add a tiny pause between syllables
+            await new Promise(r => setTimeout(r, 200));
+        }
+        onSyllable(-1); // reset selection
+        await new Promise(r => setTimeout(r, 400));
+        await this.speak(word, { rate: 0.65, ...options });
+    }
+
+    /**
+     * Celebrate correct pronunciation with phoneme-specific praise
+     */
+    async celebrateSuccessForPhoneme(targetPhonemes: string[], options?: TTSOptions): Promise<void> {
+        const PHONEME_PRAISE: Record<string, string[]> = {
+            'θ': ['Great job with that "th" sound!', 'Perfect tongue placement!'],
+            'ð': ['Awesome "th" sound!', 'That was a beautiful "th"!'],
+            'ʃ': ['Perfect "sh" sound!', 'I heard that "sh" perfectly!'],
+            'tʃ': ['Crisp "ch" sound!', 'Like a choo-choo train, great "ch"!'],
+            'r': ['Wonderful "r" sound!', 'That "r" sounded strong!'],
+            'l': ['Lovely "l" sound!', 'Beautiful "l"!'],
+            's': ['Super "s" sound!', 'Like a snake, perfect "s"!'],
+            'z': ['Zippy "z" sound!', 'Great buzzing "z"!'],
+        };
+
+        const target = targetPhonemes && targetPhonemes.length > 0 ? targetPhonemes[0] : '*';
+        const praises = PHONEME_PRAISE[target] || [
+            'Hurray! You did it!',
+            'Excellent! Great job!',
+            'Wonderful! You said it perfectly!',
+            'Amazing! You are so smart!',
+        ];
+        
+        const message = praises[Math.floor(Math.random() * praises.length)];
+        await this.speak(message, { rate: 0.8, pitch: 1.2, ...options });
+    }
 }
 
 export const ttsService = new TextToSpeechService();

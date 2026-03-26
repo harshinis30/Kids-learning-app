@@ -138,4 +138,4 @@ def optimize_glb(input_path, output_path, max_size=512):
 
     print(f"Saved optimized GLB. Original: {len(bin_data)//1024}KB, New: {len(new_bin_data)//1024}KB")
 
-optimize_glb('assets/models/rain.glb', 'assets/models/rain_optimized.glb')
+optimize_glb('assets/models/rain_v3.2.glb', 'assets/models/rain_optimized.glb')
