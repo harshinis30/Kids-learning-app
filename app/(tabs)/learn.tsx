@@ -69,6 +69,9 @@ export default function LearnScreen() {
     const wordsCompletedInSession = useRef(0);
     const BOSS_EVERY_N_WORDS = 4;
 
+    // Word highlighting
+    const [activeSyllableIdx, setActiveSyllableIdx] = useState(-1);
+
     // Lip-sync
     const [lipSyncAnimation, setLipSyncAnimation] = useState<LipSyncAnimation | null>(null);
     const [currentAnimationTime, setCurrentAnimationTime] = useState(0);
@@ -144,13 +147,24 @@ export default function LearnScreen() {
         setLearningState('introduce');
         setAnimationType('speaking');
 
-        const introText = currentItem.type === 'sound'
-            ? `This sound is "${currentItem.text}". Listen carefully: ${currentItem.text}.`
+        const introPhrase = currentItem.type === 'sound'
+            ? `This sound is "${currentItem.text}". Listen carefully.`
             : currentItem.type === 'syllable'
-                ? `This syllable is "${currentItem.text}". Say it with me: ${currentItem.text}.`
-                : `This word is "${currentItem.text}". ${currentItem.text}.`;
+                ? `This syllable is "${currentItem.text}". Say it with me.`
+                : `This word is "${currentItem.text}".`;
 
-        await ttsService.speak(introText, { rate: 0.65, ...lipSyncCallbacks });
+        await ttsService.speak(introPhrase, { rate: 0.65, ...lipSyncCallbacks });
+        await delay(400);
+
+        if (currentItem.type === 'word') {
+             await ttsService.speakSyllableByWord(
+                 currentItem.text,
+                 (idx) => setActiveSyllableIdx(idx),
+                 { rate: 0.65, ...lipSyncCallbacks }
+             );
+        } else {
+             await ttsService.speak(currentItem.text, { rate: 0.65, ...lipSyncCallbacks });
+        }
         await delay(400);
 
         setLearningState('prompt');
@@ -233,7 +247,7 @@ export default function LearnScreen() {
             return;
         }
 
-        const earnedStars = computeStars(result);
+        const earnedStars = computeStars(result, profile.currentStage);
         const actualAccuracy = result.compositeScore;
 
         setAccuracy(actualAccuracy);
@@ -373,7 +387,15 @@ export default function LearnScreen() {
     const handleReplay = async () => {
         if (!currentItem || learningState !== 'listen') return;
         setAnimationType('speaking');
-        await ttsService.speak(currentItem.text, { rate: 0.6, ...lipSyncCallbacks });
+        if (currentItem.type === 'word') {
+             await ttsService.speakSyllableByWord(
+                 currentItem.text,
+                 (idx) => setActiveSyllableIdx(idx),
+                 { rate: 0.6, ...lipSyncCallbacks }
+             );
+        } else {
+             await ttsService.speak(currentItem.text, { rate: 0.6, ...lipSyncCallbacks });
+        }
         setAnimationType('idle');
     };
 
@@ -408,6 +430,29 @@ export default function LearnScreen() {
                 durationSeconds: Math.round((Date.now() - sessionStartTime.current) / 1000),
             });
         }
+    };
+
+    const renderWordSyllables = () => {
+        if (!currentItem) return null;
+        if (currentItem.type !== 'word') {
+            return <Text style={styles.word}>{currentItem.displayText}</Text>;
+        }
+        const parts = currentItem.displayText.match(/[^aeiouy]*[aeiouy]+(?:[^aeiouy]*$|[^aeiouy](?=[^aeiouy]))?/gi) || [currentItem.displayText];
+        return (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' }}>
+                {parts.map((p, i) => (
+                    <Text 
+                        key={i} 
+                        style={[
+                            styles.word, 
+                            activeSyllableIdx === i && { color: '#4ADE80', transform: [{scale: 1.1}] }
+                        ]}
+                    >
+                        {p}
+                    </Text>
+                ))}
+            </View>
+        );
     };
 
     if (!profile || !currentItem) {
@@ -496,7 +541,7 @@ export default function LearnScreen() {
                     <View style={styles.column}>
                         <Animated.View style={[styles.wordContainer, { opacity: cardOpacity, transform: [{ scale: cardScale }] }]}>
                             <View style={styles.wordCard}>
-                                <Text style={styles.word}>{currentItem.displayText}</Text>
+                                {renderWordSyllables()}
                             </View>
                         </Animated.View>
                     </View>

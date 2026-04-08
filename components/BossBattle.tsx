@@ -252,7 +252,7 @@ export function BossBattle({ visible, bossWord, stage, profileId, onAttempt, onC
         }
 
         setLastResult(result);
-        const stars = computeStars(result);
+        const stars = computeStars(result, stage);
         onAttempt(stars);
 
         const newAttempts = attempts + 1;
@@ -433,9 +433,9 @@ export function BossBattle({ visible, bossWord, stage, profileId, onAttempt, onC
                 {lastResult && demoPhase === 'your_turn' && phase === 'battle' && (
                     <View style={{ transform: [{ scale: 0.85 }], marginTop: -15, zIndex: 10 }}>
                         <FeedbackDisplay 
-                            isCorrect={computeStars(lastResult) >= 2}
+                            isCorrect={computeStars(lastResult, stage) >= 2}
                             accuracy={lastResult.compositeScore}
-                            message={computeStars(lastResult) >= 2 ? "Great job!" : "Keep practicing!"}
+                            message={computeStars(lastResult, stage) >= 2 ? "Great job!" : "Keep practicing!"}
                             phonemes={lastResult.phonemes}
                             fluency={lastResult.fluencyScore}
                             completeness={lastResult.completenessScore}

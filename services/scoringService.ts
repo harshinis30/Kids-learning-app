@@ -15,10 +15,20 @@ export interface PronunciationResult {
 
 export function computeStars(result: PronunciationResult | number, stage: number = 1): number {
     const score = typeof result === 'number' ? result : result.compositeScore;
-    // Thresholds can be adjusted by stage if needed
-    if (score >= 90) return 3;
-    if (score >= 70) return 2;
-    if (score >= 50) return 1;
+
+    let thresholds = [60, 75, 90]; // Stage 1
+
+    if (stage === 2) {
+        thresholds = [65, 78, 92];
+    } else if (stage === 3) {
+        thresholds = [68, 80, 94];
+    } else if (stage >= 4) {
+        thresholds = [70, 82, 95];
+    }
+
+    if (score >= thresholds[2]) return 3;
+    if (score >= thresholds[1]) return 2;
+    if (score >= thresholds[0]) return 1;
     return 0;
 }
 
