@@ -28,10 +28,11 @@ import {
     Text,
     TouchableOpacity,
     View,
+    useWindowDimensions,
 } from 'react-native';
 import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 
-const { width: W, height: H } = Dimensions.get('window');
+// Dimensions handled dynamically via useWindowDimensions
 
 // ── Level Configuration ──────────────────────────────────────────────────────
 
@@ -117,8 +118,8 @@ export const writingProgress = {
         return _cache.levelStars[levelId] || 0;
     },
     isUnlocked(levelId: number) {
-        if (levelId === 1) return true;
-        return _cache.completedLevels.has(levelId - 1);
+        // UNLOCKED ALL LEVELS FOR TESTING PURPOSES!
+        return true; 
     },
 };
 
@@ -140,6 +141,7 @@ export function useWritingCompletion(trigger: boolean, levelId: number, stars: n
 // ── Floating Emoji Bubble ────────────────────────────────────────────────────
 
 function FloatingEmoji({ emoji, delay, x, size }: { emoji: string; delay: number; x: number; size: number }) {
+    const { width: W, height: H } = useWindowDimensions();
     const translateY = useRef(new Animated.Value(0)).current;
     const opacity = useRef(new Animated.Value(0.3)).current;
 
@@ -206,6 +208,7 @@ function LevelButton({
     onPress: () => void;
     index: number;
 }) {
+    const { width: W, height: H } = useWindowDimensions();
     const scaleAnim = useRef(new Animated.Value(1)).current;
     const bounceAnim = useRef(new Animated.Value(0)).current;
     const glowAnim = useRef(new Animated.Value(0)).current;
@@ -304,6 +307,7 @@ function LevelButton({
             style={[
                 styles.levelContainer,
                 {
+                    width: W * 0.35,
                     left: pos.left,
                     top: pos.top,
                     transform: [
@@ -319,6 +323,7 @@ function LevelButton({
                     style={[
                         styles.glowRing,
                         {
+                            left: (W * 0.35 - 108) / 2,
                             backgroundColor: level.glowColor,
                             opacity: glowOpacity,
                         },
@@ -388,7 +393,7 @@ function LevelButton({
 
             {/* "NEW!" badge for the next unlocked level */}
             {level.unlocked && !isComplete && (
-                <View style={styles.newBadge}>
+                <View style={[styles.newBadge, { right: (W * 0.35 - 90) / 2 - 8 }]}>
                     <Text style={styles.newBadgeText}>TAP!</Text>
                 </View>
             )}
@@ -399,6 +404,7 @@ function LevelButton({
 // ── Road Connector between levels ───────────────────────────────────────────
 
 function RoadConnector({ fromIdx, toIdx, unlocked }: { fromIdx: number; toIdx: number; unlocked: boolean }) {
+    const { width: W, height: H } = useWindowDimensions();
     // Level center positions: container left + half container width (W*0.175) for X
     // container top + half button height (45px) for Y
     const positions = [
@@ -482,6 +488,7 @@ function RoadConnector({ fromIdx, toIdx, unlocked }: { fromIdx: number; toIdx: n
 // ── Milo Character on the Map ────────────────────────────────────────────────
 
 function MiloOnMap({ currentLevel }: { currentLevel: number }) {
+    const { width: W, height: H } = useWindowDimensions();
     const positions = [
         { x: W * 0.12 + W * 0.175 + 52, y: H * 0.58 - 10 },
         { x: W * 0.52 + W * 0.175 + 52, y: H * 0.45 - 10 },
@@ -535,6 +542,8 @@ function MiloOnMap({ currentLevel }: { currentLevel: number }) {
 // ── Main Hub Component ───────────────────────────────────────────────────────
 
 export default function WritingLevelHub() {
+    const { width: W, height: H } = useWindowDimensions();
+
     const [, setForceUpdate] = useState(0);
 
     const updateUI = useCallback(() => {
@@ -766,7 +775,6 @@ const styles = StyleSheet.create({
     levelContainer: {
         position: 'absolute',
         alignItems: 'center',
-        width: W * 0.35,
         zIndex: 1,
     },
 
@@ -777,7 +785,6 @@ const styles = StyleSheet.create({
         height: 108,
         borderRadius: 54,
         top: -9,
-        left: (W * 0.35 - 108) / 2,
     },
 
     // Level button
@@ -835,7 +842,6 @@ const styles = StyleSheet.create({
     newBadge: {
         position: 'absolute',
         top: -8,
-        right: (W * 0.35 - 90) / 2 - 8,
         backgroundColor: '#FF6B6B',
         paddingHorizontal: 10,
         paddingVertical: 4,

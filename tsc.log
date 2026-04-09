@@ -1,0 +1,20 @@
+components/Character3D.tsx(6,28): error TS2307: Cannot find module 'three/examples/jsm/loaders/GLTFLoader' or its corresponding type declarations.
+components/Character3D.tsx(22,24): error TS2554: Expected 1 arguments, but got 0.
+components/Character3D.tsx(169,13): error TS18047: 'model' is possibly 'null'.
+components/Character3D.tsx(215,13): error TS18047: 'model' is possibly 'null'.
+components/Character3D.tsx(227,13): error TS18047: 'model' is possibly 'null'.
+components/Character3D.tsx(228,13): error TS18047: 'model' is possibly 'null'.
+components/Character3D.tsx(229,23): error TS2345: Argument of type 'Group<Object3DEventMap> | null' is not assignable to parameter of type 'Object3D<Object3DEventMap>'.
+  Type 'null' is not assignable to type 'Object3D<Object3DEventMap>'.
+services/modelInspector.ts(5,28): error TS2307: Cannot find module 'three/examples/jsm/loaders/GLTFLoader' or its corresponding type declarations.
+src/modules/writing/hooks/useDrawing.ts(127,17): error TS2304: Cannot find name 'computeAccuracy'.
+src/modules/writing/hooks/useDrawing.ts(133,16): error TS2552: Cannot find name 'getFeedback'. Did you mean 'setFeedback'?
+src/modules/writing/hooks/useDrawing.ts(134,20): error TS2552: Cannot find name 'canProgress'. Did you mean 'onprogress'?
+src/modules/writing/screens/Stage1Scene1.tsx(143,37): error TS2304: Cannot find name 'useWindowDimensions'.
+src/modules/writing/screens/Stage1Scene1.tsx(239,37): error TS2304: Cannot find name 'useWindowDimensions'.
+src/modules/writing/screens/Stage1Scene1.tsx(270,37): error TS2304: Cannot find name 'useWindowDimensions'.
+src/modules/writing/screens/Stage1Scene1.tsx(361,37): error TS2304: Cannot find name 'useWindowDimensions'.
+src/modules/writing/screens/Stage1Scene1.tsx(412,37): error TS2304: Cannot find name 'useWindowDimensions'.
+src/modules/writing/screens/Stage4Alphabet.tsx(1889,46): error TS2304: Cannot find name 'CANVAS_PAD'.
+src/modules/writing/screens/Stage4Alphabet.tsx(1891,12): error TS2304: Cannot find name 'CANVAS_W'.
+src/modules/writing/screens/Stage4Alphabet.tsx(1892,13): error TS2304: Cannot find name 'CANVAS_H'.

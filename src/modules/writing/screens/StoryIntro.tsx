@@ -13,10 +13,11 @@ import {
     Text,
     TouchableOpacity,
     View,
+    useWindowDimensions,
 } from 'react-native';
 import Svg, { Circle, Ellipse, Path, Rect } from 'react-native-svg';
 
-const { width: W, height: H } = Dimensions.get('window');
+// Dimensions handled dynamically via useWindowDimensions
 
 // ── Colors ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,7 @@ const C = {
 // ── Jungle Background ─────────────────────────────────────────────────────────
 
 function JungleBg() {
+    const { width: W, height: H } = useWindowDimensions();
     return (
         <Svg width={W} height={H} style={StyleSheet.absoluteFill} pointerEvents="none">
             {/* Sky gradient layers */}
@@ -126,6 +128,9 @@ export default function StoryIntro({
     onStart,
     backgroundExtra,
 }: StoryIntroProps) {
+    const { width: W, height: H } = useWindowDimensions();
+    const CARD_W = Math.min(W * 0.88, 420);
+
     // ── Animations ─────────────
     const [miloY] = useState(new Animated.Value(0));
     const [cardOpacity] = useState(new Animated.Value(0));
@@ -164,17 +169,17 @@ export default function StoryIntro({
             {backgroundExtra}
 
             {/* Stage badge */}
-            <View style={st.stageBadge}>
+            <View style={[st.stageBadge, { top: H * 0.04, left: W * 0.5 - 55 }]}>
                 <Text style={st.stageBadgeText}>Stage {stageNumber}</Text>
             </View>
 
             {/* Milo */}
-            <Animated.View style={[st.miloWrap, { transform: [{ translateY: miloY }] }]} pointerEvents="none">
+            <Animated.View style={[st.miloWrap, { top: H * 0.12, transform: [{ translateY: miloY }] }]} pointerEvents="none">
                 <Text style={st.miloEmoji}>🐒</Text>
             </Animated.View>
 
             {/* Story card */}
-            <Animated.View style={[st.card, { opacity: cardOpacity, transform: [{ translateY: cardSlide }] }]}>
+            <Animated.View style={[st.card, { width: CARD_W, marginTop: H * 0.15, opacity: cardOpacity, transform: [{ translateY: cardSlide }] }]}>
                 <Text style={st.title}>{title}</Text>
 
                 <View style={st.divider} />
@@ -201,8 +206,6 @@ export default function StoryIntro({
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const CARD_W = Math.min(W * 0.88, 420);
-
 const st = StyleSheet.create({
     root: {
         flex: 1,
@@ -211,8 +214,6 @@ const st = StyleSheet.create({
     },
     stageBadge: {
         position: 'absolute',
-        top: H * 0.04,
-        left: W * 0.5 - 55,
         backgroundColor: 'rgba(255,255,255,0.85)',
         paddingHorizontal: 20,
         paddingVertical: 6,
@@ -228,7 +229,6 @@ const st = StyleSheet.create({
     },
     miloWrap: {
         position: 'absolute',
-        top: H * 0.12,
         alignSelf: 'center',
     },
     miloEmoji: {
@@ -236,13 +236,11 @@ const st = StyleSheet.create({
         textAlign: 'center',
     },
     card: {
-        width: CARD_W,
         backgroundColor: C.cardBg,
         borderRadius: 28,
         paddingVertical: 28,
         paddingHorizontal: 24,
         alignItems: 'center',
-        marginTop: H * 0.15,
         // Soft shadow
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 6 },
