@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Dimensions, StyleSheet, Text, View } from 'react-native';
-import { G, Path } from 'react-native-svg';
+import { G, Path, Line, Svg, Rect } from 'react-native-svg';
 import expectedPathsData from '../data/expectedPaths.json';
 import StrokeLesson, { GameState } from './StrokeLesson';
-
-const { width: W, height: H } = Dimensions.get('window');
+import { useWindowDimensions } from 'react-native';
 
 const LETTER_STROKES: Record<string, string[]> = {
     'A': ['alpha_A_1', 'alpha_A_2', 'alpha_A_3'],
@@ -18,6 +17,26 @@ const LETTER_STROKES: Record<string, string[]> = {
     'w': ['cursive_w_1', 'cursive_w_exit'],
     'e': ['cursive_e_1'],
     'l': ['cursive_l_1'],
+    'a': ['cursive_a_1'],
+    'b': ['cursive_b_1'],
+    'c': ['cursive_c_1'],
+    'd': ['cursive_d_1'],
+    'f': ['cursive_f_1'],
+    'g': ['cursive_g_1'],
+    'h': ['cursive_h_1'],
+    'j': ['cursive_j_1'],
+    'k': ['cursive_k_1'],
+    'm': ['cursive_m_1'],
+    'n': ['cursive_n_1'],
+    'o': ['cursive_o_1'],
+    'p': ['cursive_p_1'],
+    'q': ['cursive_q_1'],
+    'r': ['cursive_r_1'],
+    's': ['cursive_s_1'],
+    'v': ['cursive_v_1'],
+    'x': ['cursive_x_1'],
+    'y': ['cursive_y_1'],
+    'z': ['cursive_z_1'],
 };
 
 export interface AlphabetTracerProps {
@@ -29,11 +48,11 @@ export interface AlphabetTracerProps {
 
 import { getSvgPathFromPoints } from './StrokeLesson';
 
-function renderGuidePath(pts: Array<{ x: number, y: number }>, style: 'full' | 'partial' | 'none', keyVal: string) {
+function renderGuidePath(pts: Array<{ x: number, y: number }>, style: 'full' | 'partial' | 'none', keyVal: string, W: number, H: number) {
     if (style === 'none' || !pts || pts.length === 0) return null;
 
     const isCursive = keyVal.startsWith('cursive_');
-    const pathD = getSvgPathFromPoints(pts, isCursive);
+    const pathD = getSvgPathFromPoints(pts, isCursive, W, H);
 
     if (style === 'partial') {
         return (
@@ -43,7 +62,7 @@ function renderGuidePath(pts: Array<{ x: number, y: number }>, style: 'full' | '
                     <Path
                         key={keyVal + '_glow'}
                         d={pathD}
-                        stroke="rgba(255,225,100,0.12)"
+                        stroke="rgba(255,225,100,0.2)"
                         fill="none"
                         strokeWidth={22}
                         strokeLinecap="round"
@@ -53,11 +72,12 @@ function renderGuidePath(pts: Array<{ x: number, y: number }>, style: 'full' | '
                 <Path
                     key={keyVal}
                     d={pathD}
-                    stroke={isCursive ? 'rgba(255,225,100,0.5)' : 'rgba(255,255,255,0.4)'}
+                    stroke="#FFE066"
                     fill="none"
-                    strokeWidth={isCursive ? 8 : 10}
+                    strokeWidth={12}
                     strokeLinecap="round"
                     strokeLinejoin="round"
+                    strokeDasharray="10, 20"
                 />
             </G>
         );
@@ -71,9 +91,9 @@ function renderGuidePath(pts: Array<{ x: number, y: number }>, style: 'full' | '
                 <Path
                     key={keyVal + '_halo'}
                     d={pathD}
-                    stroke="rgba(255,225,100,0.15)"
+                    stroke="rgba(255,225,100,0.2)"
                     fill="none"
-                    strokeWidth={38}
+                    strokeWidth={45}
                     strokeLinecap="round"
                     strokeLinejoin="round"
                 />
@@ -81,22 +101,24 @@ function renderGuidePath(pts: Array<{ x: number, y: number }>, style: 'full' | '
             <Path
                 key={keyVal}
                 d={pathD}
-                stroke={isCursive ? 'rgba(255,225,100,0.25)' : 'rgba(255,255,255,0.2)'}
+                stroke="#FFE066"
                 fill="none"
-                strokeWidth={isCursive ? 14 : 30}
+                strokeWidth={20}
                 strokeLinecap="round"
                 strokeLinejoin="round"
+                strokeDasharray="15, 25"
             />
             {/* For cursive: thin centre-line for precision */}
             {isCursive && (
                 <Path
                     key={keyVal + '_centre'}
                     d={pathD}
-                    stroke="rgba(255,225,100,0.55)"
+                    stroke="#FFF"
                     fill="none"
-                    strokeWidth={3}
+                    strokeWidth={4}
                     strokeLinecap="round"
                     strokeLinejoin="round"
+                    strokeDasharray="4, 10"
                 />
             )}
         </G>
@@ -125,6 +147,7 @@ function TraceEffectLayer({
 }
 
 export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, onStruggle }: AlphabetTracerProps) {
+    const { width: W, height: H } = useWindowDimensions();
     const [strokeIdx, setStrokeIdx] = useState(0);
     const [completedStrokes, setCompletedStrokes] = useState<any[]>([]);
     const [mistakeCount, setMistakeCount] = useState(0);
@@ -155,7 +178,7 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
     const guideStyle = subPhase === '4A' ? 'full' : subPhase === '4B' ? 'partial' : 'none';
 
     const handleStrokeSuccess = (drawn: Array<{ x: number, y: number }>, strokeAccuracy: number) => {
-        const pathD = getSvgPathFromPoints(drawn);
+        const pathD = getSvgPathFromPoints(drawn, false, W, H);
 
         // Track accuracy for this stroke
         strokeAccuraciesRef.current.push(strokeAccuracy);
@@ -196,16 +219,12 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
 
     return (
         <View style={StyleSheet.absoluteFill}>
-            {subPhase === '4C' && (
-                <View style={styles.refContainer} pointerEvents="none">
-                    <Text style={[
-                        styles.refText,
-                        letterId === letterId.toLowerCase() && letterId !== letterId.toUpperCase()
-                            ? styles.refTextCursive
-                            : null
-                    ]}>{letterId}</Text>
-                </View>
-            )}
+            <View style={styles.refContainer} pointerEvents="none">
+                <Text style={[
+                    styles.refText,
+                    styles.refTextCursive
+                ]}>{letterId}</Text>
+            </View>
             <StrokeLesson
                 key={activeStrokeKey + subPhase}
                 expectedPath={expectedPath as Array<{ x: number, y: number }>}
@@ -217,9 +236,28 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
                 onFail={handleStrokeFail}
                 onNext={handleNext}
             >
-                {({ drawnPoints, gameState, accuracy }) => {
+                {({ drawnPoints, gameState, accuracy, W, H }) => {
                     return (
                         <G key={activeStrokeKey + '_children'}>
+                            {/* Standard 3-Line Cursive Notebook Background on Right Half */}
+                            <G key="notebook-lines">
+                                {/* Solid White Paper Background */}
+                                <Rect
+                                    x={W * 0.38}
+                                    y={H * 0.10}
+                                    width={W * 0.58}
+                                    height={H * 0.80}
+                                    fill="#FFFFFF"
+                                    rx={20}
+                                />
+                                {/* Blue Top Line */}
+                                <Line x1={W * 0.40} y1={H * 0.25} x2={W * 0.94} y2={H * 0.25} stroke="#4A90E2" strokeWidth={3} />
+                                {/* Blue Dotted Mid Line */}
+                                <Line x1={W * 0.40} y1={H * 0.50} x2={W * 0.94} y2={H * 0.50} stroke="#4A90E2" strokeWidth={3} strokeDasharray="14,14" />
+                                {/* Red Bottom Line */}
+                                <Line x1={W * 0.40} y1={H * 0.75} x2={W * 0.94} y2={H * 0.75} stroke="#E24A4A" strokeWidth={3} />
+                            </G>
+
                             <TraceEffectLayer
                                 key={activeStrokeKey + '_effect'}
                                 gameState={gameState}
@@ -231,7 +269,7 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
                             {strokes.map((s, i) => {
                                 if (i < strokeIdx) return null;
                                 const pts = expectedPathsData[s as keyof typeof expectedPathsData] as any;
-                                return renderGuidePath(pts, guideStyle, s);
+                                return renderGuidePath(pts, guideStyle, s, W, H);
                             })}
 
                             {/* Completed strokes */}
@@ -251,9 +289,9 @@ export default function AlphabetTracer({ letterId, subPhase, onLetterComplete, o
 }
 
 const styles = StyleSheet.create({
-    refContainer: { position: 'absolute', top: 50, right: 30, zIndex: 10, opacity: 0.15 },
-    refText: { fontSize: 200, fontWeight: 'bold', color: '#FFF' },
-    refTextCursive: { fontStyle: 'italic', color: '#FFE066' },
-    phaseBadge: { position: 'absolute', top: 60, left: 20, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-    phaseText: { color: '#FFF', fontWeight: 'bold' }
+    refContainer: { position: 'absolute', top: '25%', right: '15%', zIndex: 1, opacity: 0.1, alignItems: 'center' },
+    refText: { fontSize: 380, fontWeight: 'bold', color: '#FFF' },
+    refTextCursive: { fontStyle: 'italic', fontFamily: 'serif' },
+    phaseBadge: { position: 'absolute', top: 20, left: '34%', backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', zIndex: 50 },
+    phaseText: { color: '#FFF', fontWeight: '900', fontSize: 16 }
 });

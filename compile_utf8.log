@@ -1,0 +1,9 @@
+﻿components/Character3D.tsx(6,28): error TS2307: Cannot find module 'three/examples/jsm/loaders/GLTFLoader' or its corresponding type declarations.
+components/Character3D.tsx(22,24): error TS2554: Expected 1 arguments, but got 0.
+components/Character3D.tsx(169,13): error TS18047: 'model' is possibly 'null'.
+components/Character3D.tsx(215,13): error TS18047: 'model' is possibly 'null'.
+components/Character3D.tsx(227,13): error TS18047: 'model' is possibly 'null'.
+components/Character3D.tsx(228,13): error TS18047: 'model' is possibly 'null'.
+components/Character3D.tsx(229,23): error TS2345: Argument of type 'Group<Object3DEventMap> | null' is not assignable to parameter of type 'Object3D<Object3DEventMap>'.
+  Type 'null' is not assignable to type 'Object3D<Object3DEventMap>'.
+services/modelInspector.ts(5,28): error TS2307: Cannot find module 'three/examples/jsm/loaders/GLTFLoader' or its corresponding type declarations.

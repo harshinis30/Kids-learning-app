@@ -10,12 +10,12 @@ import { router } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import StoryIntro from './StoryIntro';
 import {
-    Dimensions,
     Animated as RNAnimated,
     SafeAreaView,
     StyleSheet,
     Text,
     TouchableOpacity,
+    useWindowDimensions,
     View
 } from 'react-native';
 import {
@@ -45,8 +45,7 @@ import { useWritingCompletion } from './WritingLevelHub';
 
 // ── Screen dimensions ─────────────────────────────────────────────────────────
 
-const { width: W, height: H } = Dimensions.get('window');
-const DIMS = { width: W, height: H };
+// Dimensions handled dynamically via useWindowDimensions
 
 // ── Milo ──────────────────────────────────────────────────────────────────────
 
@@ -116,7 +115,7 @@ type GameState = 'idle' | 'drawing' | 'success' | 'fail' | 'complete';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function getSvgPathFromPoints(pts: Array<{ x: number, y: number }>, makeCurve: boolean = false) {
+function getSvgPathFromPoints(pts: Array<{ x: number, y: number }>, makeCurve: boolean = false, W: number, H: number) {
     if (!pts || pts.length === 0) return '';
     if (pts.length === 1) return `M ${pts[0].x * W} ${pts[0].y * H}`;
 
@@ -141,6 +140,7 @@ function getSvgPathFromPoints(pts: Array<{ x: number, y: number }>, makeCurve: b
 // ── Scene Background Renderer ─────────────────────────────────────────────────
 
 function SceneBackground({ sceneIdx }: { sceneIdx: number }) {
+    const { width: W, height: H } = useWindowDimensions();
     switch (sceneIdx) {
         case 0:
             return (
@@ -236,6 +236,7 @@ function SceneBackground({ sceneIdx }: { sceneIdx: number }) {
 // ── Direction Guide Layer ─────────────────────────────────────────────────────
 
 function AnimatedGuideLayer({ scene }: { scene: SceneConfig }) {
+    const { width: W, height: H } = useWindowDimensions();
     const pts = expectedPathsData[scene.key] as Array<{ x: number; y: number }>;
     if (!pts || pts.length < 2) return null;
 
@@ -266,6 +267,7 @@ function AnimatedGuideLayer({ scene }: { scene: SceneConfig }) {
 }
 
 function TravelingDotOverlay({ scene, isIdle }: { scene: SceneConfig; isIdle: boolean }) {
+    const { width: W, height: H } = useWindowDimensions();
     const pts = expectedPathsData[scene.key] as Array<{ x: number; y: number }>;
     const [progress, setProgress] = useState(0);
     const [visible, setVisible] = useState(true);
@@ -356,6 +358,7 @@ function TravelingDotOverlay({ scene, isIdle }: { scene: SceneConfig; isIdle: bo
 // ── Guide Path Renderer ───────────────────────────────────────────────────────
 
 function GuidePathLayer({ scene }: { scene: SceneConfig }) {
+    const { width: W, height: H } = useWindowDimensions();
     const pts = expectedPathsData[scene.key] as Array<{ x: number; y: number }>;
 
     if (scene.strokeType === 'dot-to-dot') {
@@ -373,7 +376,7 @@ function GuidePathLayer({ scene }: { scene: SceneConfig }) {
     }
 
     const isCurve = scene.strokeType === 'curve';
-    const pathD = getSvgPathFromPoints(pts, isCurve);
+    const pathD = getSvgPathFromPoints(pts, isCurve, W, H);
 
     return (
         <Svg width="100%" height="100%" style={[StyleSheet.absoluteFill, { userSelect: 'none' } as any]} pointerEvents="none">
@@ -406,11 +409,17 @@ function GuidePathLayer({ scene }: { scene: SceneConfig }) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 function Stage1Gameplay() {
+    const { width: W, height: H } = useWindowDimensions();
+    const DIMS = { width: W, height: H };
     const [currentScene, setCurrentScene] = useState(0);
     const [gameState, setGameState] = useState<GameState>('idle');
     const [accuracy, setAccuracy] = useState<number | null>(null);
     const [feedback, setFeedback] = useState<{ message: string; emoji: string } | null>(null);
     const [colorIndex, setColorIndex] = useState(0);
+
+    // Timer state
+    const [globalCountdown, setGlobalCountdown] = useState(30);
+    const globalTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // Mark completion safely via hook
     useWritingCompletion(gameState === 'complete', 1, 3);
@@ -461,6 +470,59 @@ function Stage1Gameplay() {
             player.play();
         } catch (_) { /* ignore browser unready issues */ }
     }, [player]);
+
+    const forceEvaluate = useCallback(() => {
+        if (gameState !== 'drawing' && gameState !== 'idle') return;
+        if (globalTimerRef.current) clearInterval(globalTimerRef.current);
+
+        // Evaluate even if no points drawn
+        const acc = allDrawnPointsRef.current.length > 0
+            ? computeAccuracy(allDrawnPointsRef.current, expectedPath, DIMS)
+            : 0;
+
+        const fb = getFeedback(acc);
+        const progresses = canProgress(acc);
+
+        setAccuracy(acc);
+        setFeedback(fb);
+
+        if (progresses) {
+            miloX.value = withSpring(scene.miloEndNorm.x * W - MILO_SIZE / 2, { damping: 12, stiffness: 100 });
+            miloY.value = withSpring(scene.miloEndNorm.y * H - MILO_SIZE / 2, { damping: 12, stiffness: 100 });
+            setGameState('success');
+            playSuccess();
+        } else {
+            setGameState('fail');
+        }
+    }, [allDrawnPointsRef.current, expectedPath, DIMS, gameState, miloX, miloY, playSuccess, scene, W, H]);
+
+    const startGlobalTimer = useCallback(() => {
+        if (globalTimerRef.current) clearInterval(globalTimerRef.current);
+        setGlobalCountdown(30);
+        globalTimerRef.current = setInterval(() => {
+            setGlobalCountdown(prev => {
+                if (prev <= 1) {
+                    if (globalTimerRef.current) clearInterval(globalTimerRef.current);
+                    forceEvaluate();
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+    }, [forceEvaluate]);
+
+    // Handle timer initialization when idle (e.g. at start of scene)
+    useEffect(() => {
+        if (gameState === 'idle') {
+            startGlobalTimer();
+        }
+    }, [gameState, startGlobalTimer]);
+
+    useEffect(() => {
+        return () => {
+            if (globalTimerRef.current) clearInterval(globalTimerRef.current);
+        };
+    }, []);
 
     const resetScene = useCallback(() => {
         drawnPointsRef.current = [];
@@ -535,22 +597,7 @@ function Stage1Gameplay() {
         .onEnd(() => {
             // MULTI-STROKE: Accumulate this stroke's points
             allDrawnPointsRef.current = allDrawnPointsRef.current.concat(drawnPointsRef.current);
-
-            const acc = computeAccuracy(allDrawnPointsRef.current, expectedPath, DIMS);
-            const fb = getFeedback(acc);
-            const progresses = canProgress(acc);
-
-            setAccuracy(acc);
-            setFeedback(fb);
-
-            if (progresses) {
-                miloX.value = withSpring(scene.miloEndNorm.x * W - MILO_SIZE / 2, { damping: 12, stiffness: 100 });
-                miloY.value = withSpring(scene.miloEndNorm.y * H - MILO_SIZE / 2, { damping: 12, stiffness: 100 });
-                setGameState('success');
-                playSuccess();
-            } else {
-                setGameState('fail');
-            }
+            // Wait for 30s timer or "Done ✅" manual evaluation
         });
 
     const strokeColor = TRAIL_COLORS[colorIndex % TRAIL_COLORS.length];
@@ -794,6 +841,18 @@ function Stage1Gameplay() {
                             </View>
                         )}
 
+                        {/* Timer & Done Button UI */}
+                        {(gameState === 'drawing' || gameState === 'idle') && (
+                            <View style={styles.timerContainer} pointerEvents="box-none">
+                                <View style={styles.timerBadge}>
+                                    <Text style={styles.timerText}>⏳ {globalCountdown}s</Text>
+                                </View>
+                                <TouchableOpacity style={styles.doneBtn} onPress={() => forceEvaluate()}>
+                                    <Text style={styles.doneBtnText}>Done ✅</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+
                         {gameState === 'success' && feedback && (
                             <View style={styles.overlay}>
                                 <Text style={styles.overlayEmoji}>{feedback.emoji}</Text>
@@ -941,6 +1000,42 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         borderRadius: 20,
         overflow: 'hidden',
+    },
+    timerContainer: {
+        position: 'absolute',
+        top: 20,
+        right: 20,
+        alignItems: 'flex-end',
+        gap: 12,
+        zIndex: 20,
+    },
+    timerBadge: {
+        backgroundColor: 'rgba(0,0,0,0.4)',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)'
+    },
+    timerText: {
+        fontSize: 20,
+        fontWeight: '900',
+        color: '#FFF'
+    },
+    doneBtn: {
+        backgroundColor: '#4CD964',
+        paddingHorizontal: 24,
+        paddingVertical: 14,
+        borderRadius: 30,
+        shadowColor: '#4CD964',
+        shadowOpacity: 0.6,
+        shadowRadius: 10,
+        elevation: 5
+    },
+    doneBtnText: {
+        fontSize: 18,
+        fontWeight: '900',
+        color: '#FFF',
     },
     completeBg: { backgroundColor: '#1a1a2e' },
     completeContainer: {
