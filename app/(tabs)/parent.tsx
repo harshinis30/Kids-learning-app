@@ -11,6 +11,7 @@ import {
     View,
 } from 'react-native';
 import { STAGE_NAMES } from '../../data/curriculum';
+import { getPetName, savePetName } from '../../services/petService';
 import { ProblemArea, problemTracker } from '../../services/problemTracker';
 import { ChildProfile, profileService } from '../../services/profileService';
 import { progressTracker, SessionRecord } from '../../services/progressTracker';
@@ -35,7 +36,10 @@ export default function ParentDashboard() {
     const [selectedProfile, setSelectedProfile] = useState<ChildProfile | null>(null);
     const [sessions, setSessions] = useState<SessionRecord[]>([]);
     const [problems, setProblems] = useState<ProblemArea[]>([]);
+    const [strongSounds, setStrongSounds] = useState<ProblemArea[]>([]);
     const [achievements, setAchievements] = useState<string[]>([]);
+    const [petNameInput, setPetNameInput] = useState('');
+    const [petNameSaved, setPetNameSaved] = useState(false);
 
     const handlePinSubmit = () => {
         if (pinInput === PARENT_PIN) {
@@ -56,14 +60,19 @@ export default function ParentDashboard() {
 
     const selectProfile = async (p: ChildProfile) => {
         setSelectedProfile(p);
-        const [s, probs, achs] = await Promise.all([
+        setPetNameSaved(false);
+        const [s, probs, strongs, achs, pName] = await Promise.all([
             progressTracker.getRecentSessions(p.id, 10),
             problemTracker.getProblemAreas(p.id),
+            problemTracker.getStrongestSounds(p.id),
             progressTracker.getAchievements(p.id),
+            getPetName(p.id),
         ]);
         setSessions(s);
         setProblems(probs);
+        setStrongSounds(strongs);
         setAchievements(achs);
+        setPetNameInput(pName);
     };
 
     const handleDeleteProfile = (p: ChildProfile) => {
@@ -188,10 +197,10 @@ export default function ParentDashboard() {
                             </View>
 
                             {/* Problem Areas */}
-                            <Text style={styles.sectionTitle}>🎯 Needs Practice</Text>
+                            <Text style={styles.sectionTitle}>🎯 Tricky Sounds</Text>
                             {problems.length === 0 ? (
                                 <View style={styles.emptyCard}>
-                                    <Text style={styles.emptyText}>🌟 No problem areas yet! Keep practicing.</Text>
+                                    <Text style={styles.emptyText}>🌟 No tricky sounds yet! Keep practicing.</Text>
                                 </View>
                             ) : (
                                 problems.map((p, i) => (
@@ -211,6 +220,30 @@ export default function ParentDashboard() {
                                         </View>
                                     </View>
                                 ))
+                            )}
+
+                            {/* Strong Sounds */}
+                            {strongSounds.length > 0 && (
+                                <>
+                                    <Text style={styles.sectionTitle}>✨ Strong Sounds</Text>
+                                    {strongSounds.map((p, i) => (
+                                        <View key={i} style={styles.problemRow}>
+                                            <View style={{ flex: 1 }}>
+                                                <Text style={styles.problemLabel}>{p.label}</Text>
+                                                <Text style={styles.problemAttempts}>{p.attempts} attempts</Text>
+                                            </View>
+                                            <View style={styles.problemBarContainer}>
+                                                <View style={styles.problemBar}>
+                                                    <View style={[styles.problemBarFill, {
+                                                        width: `${p.averageAccuracy}%`,
+                                                        backgroundColor: '#10B981',
+                                                    }]} />
+                                                </View>
+                                                <Text style={styles.problemPct}>{Math.round(p.averageAccuracy)}%</Text>
+                                            </View>
+                                        </View>
+                                    ))}
+                                </>
                             )}
 
                             {/* Session History */}
@@ -273,6 +306,35 @@ export default function ParentDashboard() {
                                         <Text style={styles.tipText}>• Celebrate every achievement, big or small!</Text>
                                     </>
                                 )}
+                            </View>
+
+                            {/* Pet Naming */}
+                            <Text style={styles.sectionTitle}>🐾 Name Your Pet</Text>
+                            <View style={styles.petNameCard}>
+                                <Text style={styles.petNameLabel}>Give your child's companion a special name:</Text>
+                                <View style={styles.petNameRow}>
+                                    <TextInput
+                                        style={styles.petNameInput}
+                                        value={petNameInput}
+                                        onChangeText={text => { setPetNameInput(text); setPetNameSaved(false); }}
+                                        placeholder="Buddy"
+                                        placeholderTextColor="rgba(255,255,255,0.3)"
+                                        maxLength={16}
+                                    />
+                                    <TouchableOpacity
+                                        style={[styles.petNameSaveBtn, petNameSaved && styles.petNameSaveBtnDone]}
+                                        onPress={async () => {
+                                            if (selectedProfile) {
+                                                await savePetName(selectedProfile.id, petNameInput);
+                                                setPetNameSaved(true);
+                                            }
+                                        }}
+                                    >
+                                        <Text style={styles.petNameSaveBtnText}>
+                                            {petNameSaved ? '✅ Saved!' : 'Save'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
                             </View>
                         </>
                     )}
@@ -419,4 +481,36 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     emptyText: { fontSize: 14, color: 'rgba(255,255,255,0.5)', textAlign: 'center' },
+
+    // Pet naming
+    petNameCard: {
+        backgroundColor: 'rgba(255,255,255,0.07)',
+        borderRadius: 16,
+        padding: 16,
+        gap: 10,
+        borderWidth: 1,
+        borderColor: 'rgba(255,224,102,0.2)',
+    },
+    petNameLabel: { fontSize: 13, color: 'rgba(255,255,255,0.6)' },
+    petNameRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+    petNameInput: {
+        flex: 1,
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        borderRadius: 12,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#fff',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.15)',
+    },
+    petNameSaveBtn: {
+        backgroundColor: '#FFE066',
+        borderRadius: 12,
+        paddingHorizontal: 18,
+        paddingVertical: 10,
+    },
+    petNameSaveBtnDone: { backgroundColor: 'rgba(16,185,129,0.8)' },
+    petNameSaveBtnText: { fontSize: 14, fontWeight: '900', color: '#1a1a2e' },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface RecordButtonProps {
@@ -6,15 +6,89 @@ interface RecordButtonProps {
     isRecording: boolean;
     isProcessing: boolean;
     disabled?: boolean;
+    meteringLevel?: number;
 }
 
 export function RecordButton({
     onPress,
     isRecording,
     isProcessing,
-    disabled = false
+    disabled = false,
+    meteringLevel
 }: RecordButtonProps) {
     const scaleAnim = useRef(new Animated.Value(1)).current;
+    const [lowVolumeWarning, setLowVolumeWarning] = useState(false);
+    const lowVolumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [fakeMeter, setFakeMeter] = useState(0);
+
+    useEffect(() => {
+        let interval: ReturnType<typeof setInterval>;
+        if (isRecording && meteringLevel === undefined) {
+            // Fake metering for Web where actual metering isn't supported
+            interval = setInterval(() => {
+                setFakeMeter(0.3 + Math.random() * 0.5);
+            }, 100);
+        } else {
+            setFakeMeter(0);
+        }
+        return () => clearInterval(interval);
+    }, [isRecording, meteringLevel]);
+
+    useEffect(() => {
+        if (isRecording && meteringLevel !== undefined && meteringLevel < -40) {
+            if (!lowVolumeTimer.current) {
+                lowVolumeTimer.current = setTimeout(() => {
+                    setLowVolumeWarning(true);
+                }, 1000);
+            }
+        } else {
+            if (lowVolumeTimer.current) {
+                clearTimeout(lowVolumeTimer.current);
+                lowVolumeTimer.current = null;
+            }
+            setLowVolumeWarning(false);
+        }
+        return () => {
+            if (lowVolumeTimer.current) {
+                clearTimeout(lowVolumeTimer.current);
+            }
+        };
+    }, [meteringLevel, isRecording]);
+
+    const renderMeterBars = () => {
+        if (!isRecording) return null;
+        
+        let normalized = 0;
+        if (meteringLevel !== undefined) {
+             // mapping roughly -60 dBFS to 0 dBFS into a 0..1 range
+             normalized = Math.max(0, Math.min(1, (meteringLevel + 60) / 60));
+        } else {
+             // Web fallback visual feedback
+             normalized = fakeMeter;
+        }
+        
+        return (
+            <View style={styles.meterContainer}>
+                {[1, 2, 3, 4, 5].map((i) => {
+                    const threshold = (i - 1) / 5;
+                    const active = normalized > threshold;
+                    const barHeight = active ? 12 + (i === 3 ? 8 : (i % 2 === 0 ? 4 : 0)) : 6;
+                    return (
+                        <View 
+                            key={i} 
+                            style={[
+                                styles.meterBar, 
+                                { 
+                                    height: barHeight, 
+                                    backgroundColor: active ? '#10B981' : 'rgba(255,255,255,0.3)' 
+                                }
+                            ]} 
+                        />
+                    );
+                })}
+            </View>
+        );
+    };
     const rippleAnim = useRef(new Animated.Value(0)).current;
     const rotateAnim = useRef(new Animated.Value(0)).current;
 
@@ -124,13 +198,24 @@ export function RecordButton({
     };
 
     return (
-        <TouchableOpacity
-            onPress={handlePress}
-            disabled={disabled || isProcessing}
-            activeOpacity={0.8}
-            style={styles.container}
-        >
-            {/* Ripple effect */}
+        <View style={styles.wrapper}>
+            {/* Volume Meter */}
+            {renderMeterBars()}
+
+            {/* Warning badge */}
+            {lowVolumeWarning && isRecording && (
+                <View style={styles.warningBadge}>
+                    <Text style={styles.warningText}>Speak louder 📢</Text>
+                </View>
+            )}
+
+            <TouchableOpacity
+                onPress={handlePress}
+                disabled={disabled || isProcessing}
+                activeOpacity={0.8}
+                style={styles.container}
+            >
+                {/* Ripple effect */}
             {isRecording && (
                 <Animated.View
                     style={[
@@ -176,7 +261,8 @@ export function RecordButton({
                     },
                 ]}
             />
-        </TouchableOpacity>
+            </TouchableOpacity>
+        </View>
     );
 }
 
@@ -187,49 +273,49 @@ const styles = StyleSheet.create({
     },
     ripple: {
         position: 'absolute',
-        width: 160,
-        height: 160,
-        borderRadius: 80,
+        width: 96,
+        height: 96,
+        borderRadius: 48,
     },
     button: {
-        width: 160,
-        height: 160,
-        borderRadius: 80,
+        width: 90,
+        height: 90,
+        borderRadius: 45,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
+        shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.3,
-        shadowRadius: 16,
-        elevation: 12,
+        shadowRadius: 10,
+        elevation: 10,
     },
     buttonInner: {
         flex: 1,
-        borderRadius: 80,
+        borderRadius: 45,
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 20,
-        borderWidth: 4,
+        padding: 10,
+        borderWidth: 3,
         borderColor: 'rgba(255, 255, 255, 0.3)',
     },
     decorativeRing: {
         position: 'absolute',
-        top: -6,
-        left: -6,
-        right: -6,
-        bottom: -6,
-        borderRadius: 86,
-        borderWidth: 3,
+        top: -5,
+        left: -5,
+        right: -5,
+        bottom: -5,
+        borderRadius: 50,
+        borderWidth: 2,
         borderColor: 'rgba(255, 255, 255, 0.2)',
     },
     emoji: {
-        fontSize: 56,
-        marginBottom: 8,
+        fontSize: 30,
+        marginBottom: 3,
         textShadowColor: 'rgba(0, 0, 0, 0.3)',
         textShadowOffset: { width: 0, height: 2 },
         textShadowRadius: 4,
     },
     text: {
         color: '#FFFFFF',
-        fontSize: 18,
+        fontSize: 12,
         fontWeight: '800',
         textAlign: 'center',
         textShadowColor: 'rgba(0, 0, 0, 0.3)',
@@ -239,11 +325,46 @@ const styles = StyleSheet.create({
     },
     glow: {
         position: 'absolute',
-        width: 160,
-        height: 160,
-        borderRadius: 80,
+        width: 90,
+        height: 90,
+        borderRadius: 45,
         shadowOffset: { width: 0, height: 0 },
         shadowOpacity: 0.6,
-        shadowRadius: 24,
+        shadowRadius: 16,
+    },
+    wrapper: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    meterContainer: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+        gap: 4,
+        height: 24,
+        marginBottom: 12,
+    },
+    meterBar: {
+        width: 6,
+        borderRadius: 3,
+    },
+    warningBadge: {
+        position: 'absolute',
+        top: -24,
+        backgroundColor: '#F59E0B',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 5,
+        zIndex: 10,
+    },
+    warningText: {
+        color: '#fff',
+        fontWeight: '800',
+        fontSize: 12,
     },
 });

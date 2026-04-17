@@ -1,288 +1,322 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Animated, StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import { ttsService } from '../services/textToSpeech';
 
+// ── Score → Category ────────────────────────────────────────────────────────
+function getCategory(score: number): { label: string; emoji: string; color: string; bg: string } {
+    if (score >= 80) return { label: 'Great!',      emoji: '🌟', color: '#15803D', bg: '#DCFCE7' };
+    if (score >= 60) return { label: 'Almost!',     emoji: '👍', color: '#B45309', bg: '#FEF3C7' };
+    return             { label: 'Try Again',         emoji: '💪', color: '#B91C1C', bg: '#FEE2E2' };
+}
+
+// ── Metric Row ───────────────────────────────────────────────────────────────
+function MetricBar({ label, icon, score }: { label: string; icon: string; score: number }) {
+    const cat = getCategory(score);
+    const fillAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        Animated.timing(fillAnim, {
+            toValue: Math.min(100, Math.max(0, score)),
+            duration: 600,
+            useNativeDriver: false,
+        }).start();
+    }, [score]);
+
+    const fillWidth = fillAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] });
+
+    return (
+        <View style={[styles.metricCard, { backgroundColor: cat.bg }]}>
+            <View style={styles.metricHeader}>
+                <Text style={styles.metricIcon}>{icon}</Text>
+                <Text style={[styles.metricLabel, { color: cat.color }]}>{label}</Text>
+                <View style={styles.metricBadge}>
+                    <Text style={[styles.metricBadgeText, { color: cat.color }]}>{cat.emoji} {cat.label}</Text>
+                </View>
+            </View>
+            <View style={styles.metricTrack}>
+                <Animated.View style={[styles.metricFill, { width: fillWidth, backgroundColor: cat.color }]} />
+            </View>
+        </View>
+    );
+}
+
+// ── Mouth hints ───────────────────────────────────────────────────────────────
+const MOUTH_HINTS: Record<string, string> = {
+    'θ': '👄 Put your tongue between your teeth!',
+    'ð': '👄 Tongue between teeth & use voice!',
+    'ʃ': '👄 Round your lips and blow air!',
+    'f': '👄 Top teeth on bottom lip!',
+    'v': '👄 Top teeth on bottom lip & use voice!',
+    'r': '👄 Pull your tongue back!',
+    'l': '👄 Tongue up behind top teeth!',
+};
+
+// ── Props ─────────────────────────────────────────────────────────────────────
 interface FeedbackDisplayProps {
     isCorrect: boolean | null;
     accuracy: number;
     message: string;
     visible: boolean;
+    phonemes?: { phoneme: string; accuracyScore: number }[];
+    targetWord?: string;
+    fluency?: number;
+    completeness?: number;
+    prosody?: number;
 }
 
+// ── Main Component ────────────────────────────────────────────────────────────
 export function FeedbackDisplay({
     isCorrect,
     accuracy,
     message,
-    visible
+    visible,
+    phonemes,
+    fluency,
+    completeness,
+    prosody,
 }: FeedbackDisplayProps) {
-    const fadeAnim = useRef(new Animated.Value(0)).current;
-    const scaleAnim = useRef(new Animated.Value(0.5)).current;
+    const slideAnim  = useRef(new Animated.Value(40)).current;
+    const fadeAnim   = useRef(new Animated.Value(0)).current;
     const emojiScale = useRef(new Animated.Value(0)).current;
-    const confettiAnim = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
         if (visible) {
-            // Main card animation
             Animated.parallel([
-                Animated.timing(fadeAnim, {
-                    toValue: 1,
-                    duration: 300,
-                    useNativeDriver: true,
-                }),
-                Animated.spring(scaleAnim, {
-                    toValue: 1,
-                    friction: 6,
-                    tension: 40,
-                    useNativeDriver: true,
-                }),
-            ]).start();
-
-            // Emoji pop animation
-            Animated.sequence([
-                Animated.delay(200),
-                Animated.spring(emojiScale, {
-                    toValue: 1,
-                    friction: 4,
-                    tension: 40,
-                    useNativeDriver: true,
-                }),
-            ]).start();
-
-            // Confetti animation for success
-            if (isCorrect) {
+                Animated.timing(fadeAnim,  { toValue: 1, duration: 280, useNativeDriver: true }),
+                Animated.spring(slideAnim, { toValue: 0, friction: 7, tension: 60, useNativeDriver: true }),
                 Animated.sequence([
-                    Animated.delay(300),
-                    Animated.timing(confettiAnim, {
-                        toValue: 1,
-                        duration: 1000,
-                        useNativeDriver: true,
-                    }),
-                ]).start();
-            }
+                    Animated.delay(120),
+                    Animated.spring(emojiScale, { toValue: 1, friction: 4, tension: 50, useNativeDriver: true }),
+                ]),
+            ]).start();
         } else {
             fadeAnim.setValue(0);
-            scaleAnim.setValue(0.5);
+            slideAnim.setValue(40);
             emojiScale.setValue(0);
-            confettiAnim.setValue(0);
         }
-    }, [visible, isCorrect]);
+    }, [visible]);
 
     if (!visible) return null;
 
-    const getEmoji = () => {
-        if (isCorrect === null) return '🤔';
-        if (isCorrect) return '🎉';
-        if (accuracy >= 60) return '👍';
-        return '💪';
-    };
+    // Header colour
+    const headerBg   = isCorrect === true  ? '#7C3AED'   // purple for success
+                     : isCorrect === false && accuracy >= 60 ? '#EA580C'  // orange for almost
+                     : '#1E3A5F';                                         // deep blue for try again
 
-    const getGradientColors = (): [string, string] => {
-        if (isCorrect === null) return ['#94A3B8', '#64748B'];
-        if (isCorrect) return ['#10B981', '#059669'];
-        if (accuracy >= 60) return ['#F59E0B', '#D97706'];
-        return ['#EF4444', '#DC2626'];
-    };
+    const mainEmoji  = isCorrect === true  ? '🎉'
+                     : accuracy >= 60      ? '👍'
+                     :                       '💪';
 
-    const confettiOpacity = confettiAnim.interpolate({
-        inputRange: [0, 0.5, 1],
-        outputRange: [0, 1, 0],
-    });
+    // Worst phoneme hint
+    let hintText: string | null = null;
+    if (phonemes && phonemes.length > 0 && isCorrect === false) {
+        const worst = phonemes.reduce((a, b) => b.accuracyScore < a.accuracyScore ? b : a, phonemes[0]);
+        if (worst.accuracyScore < 60 && MOUTH_HINTS[worst.phoneme]) {
+            hintText = MOUTH_HINTS[worst.phoneme];
+        }
+    }
 
-    const confettiTranslate = confettiAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: [0, -100],
-    });
+    const hasMetrics = fluency !== undefined || completeness !== undefined || prosody !== undefined;
 
     return (
-        <Animated.View
-            style={[
-                styles.container,
-                {
-                    opacity: fadeAnim,
-                    transform: [{ scale: scaleAnim }],
-                },
-            ]}
-        >
-            <LinearGradient
-                colors={getGradientColors()}
-                style={styles.card}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-            >
-                {/* Confetti effect */}
-                {isCorrect && (
-                    <Animated.View
-                        style={[
-                            styles.confettiContainer,
-                            {
-                                opacity: confettiOpacity,
-                                transform: [{ translateY: confettiTranslate }],
-                            },
-                        ]}
-                    >
-                        <Text style={styles.confetti}>🎊</Text>
-                        <Text style={styles.confetti}>✨</Text>
-                        <Text style={styles.confetti}>⭐</Text>
-                        <Text style={styles.confetti}>🌟</Text>
-                        <Text style={styles.confetti}>💫</Text>
-                    </Animated.View>
-                )}
+        <Animated.View style={[styles.wrapper, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
 
-                {/* Emoji */}
-                <Animated.Text
-                    style={[
-                        styles.emoji,
-                        {
-                            transform: [{ scale: emojiScale }],
-                        },
-                    ]}
-                >
-                    {getEmoji()}
+            {/* ── Header banner ─────────────────────────────────────────── */}
+            <View style={[styles.header, { backgroundColor: headerBg }]}>
+                <Animated.Text style={[styles.headerEmoji, { transform: [{ scale: emojiScale }] }]}>
+                    {mainEmoji}
                 </Animated.Text>
-
-                {/* Message */}
-                <Text style={styles.message}>{message}</Text>
-
-                {/* Accuracy bar */}
+                <Text style={styles.headerMessage} numberOfLines={2}>{message}</Text>
                 {accuracy > 0 && (
-                    <View style={styles.accuracyContainer}>
-                        <View style={styles.progressBar}>
-                            <Animated.View
-                                style={[
-                                    styles.progressFill,
-                                    {
-                                        width: `${accuracy}%`,
-                                    },
-                                ]}
-                            />
-                        </View>
-                        <View style={styles.accuracyBadge}>
-                            <Text style={styles.accuracyText}>{Math.round(accuracy)}%</Text>
+                    <View style={styles.scorePill}>
+                        <Text style={styles.scorePillText}>{Math.round(accuracy)}%</Text>
+                    </View>
+                )}
+            </View>
+
+            {/* ── Body ──────────────────────────────────────────────────── */}
+            <View style={styles.body}>
+
+                {/* Phoneme chips */}
+                {phonemes && phonemes.length > 0 && (
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Sounds</Text>
+                        <View style={styles.chipsRow}>
+                            {phonemes.map((p, i) => {
+                                const col = p.accuracyScore >= 80 ? '#15803D'
+                                          : p.accuracyScore >= 60 ? '#B45309'
+                                          : '#B91C1C';
+                                const bg  = p.accuracyScore >= 80 ? '#DCFCE7'
+                                          : p.accuracyScore >= 60 ? '#FEF3C7'
+                                          : '#FEE2E2';
+                                return (
+                                    <TouchableOpacity
+                                        key={i}
+                                        style={[styles.chip, { backgroundColor: bg, borderColor: col }]}
+                                        onPress={() => ttsService.speak(p.phoneme, { rate: 0.4 })}
+                                    >
+                                        <Text style={[styles.chipText, { color: col }]}>{p.phoneme}</Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
                         </View>
                     </View>
                 )}
 
-                {/* Decorative elements */}
-                <View style={styles.decorativeCircle} />
-            </LinearGradient>
+                {/* Mouth hint */}
+                {hintText && (
+                    <View style={styles.hintBanner}>
+                        <Text style={styles.hintText}>{hintText}</Text>
+                    </View>
+                )}
 
-            {/* Glow effect */}
-            <View
-                style={[
-                    styles.glow,
-                    {
-                        shadowColor: getGradientColors()[0],
-                    },
-                ]}
-            />
+                {/* Metric bars */}
+                {hasMetrics && (
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>How you did</Text>
+                        {completeness !== undefined && <MetricBar label="Completeness" icon="🎯" score={completeness} />}
+                        {fluency      !== undefined && <MetricBar label="Fluency"      icon="🌊" score={fluency}      />}
+                        {prosody      !== undefined && <MetricBar label="Prosody"      icon="🎵" score={prosody}      />}
+                    </View>
+                )}
+
+            </View>
         </Animated.View>
     );
 }
 
+// ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-    container: {
-        marginHorizontal: 20,
-    },
-    card: {
-        padding: 28,
-        borderRadius: 28,
-        alignItems: 'center',
-        borderWidth: 3,
-        borderColor: 'rgba(255, 255, 255, 0.4)',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.3,
-        shadowRadius: 20,
-        elevation: 12,
+    wrapper: {
+        marginHorizontal: 16,
+        borderRadius: 24,
         overflow: 'hidden',
-    },
-    confettiContainer: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        paddingHorizontal: 20,
-    },
-    confetti: {
-        fontSize: 32,
-    },
-    emoji: {
-        fontSize: 80,
-        marginBottom: 16,
-        textShadowColor: 'rgba(0, 0, 0, 0.3)',
-        textShadowOffset: { width: 0, height: 4 },
-        textShadowRadius: 8,
-    },
-    message: {
-        fontSize: 24,
-        fontWeight: '800',
-        color: '#FFFFFF',
-        textAlign: 'center',
-        marginBottom: 16,
-        textShadowColor: 'rgba(0, 0, 0, 0.3)',
-        textShadowOffset: { width: 0, height: 2 },
-        textShadowRadius: 4,
-        letterSpacing: 0.5,
-    },
-    accuracyContainer: {
-        width: '100%',
-        marginTop: 8,
-    },
-    progressBar: {
-        height: 16,
-        backgroundColor: 'rgba(0, 0, 0, 0.2)',
-        borderRadius: 12,
-        overflow: 'hidden',
-        marginBottom: 12,
-        borderWidth: 2,
-        borderColor: 'rgba(255, 255, 255, 0.3)',
-    },
-    progressFill: {
-        height: '100%',
         backgroundColor: '#FFFFFF',
-        borderRadius: 10,
-        shadowColor: '#fff',
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.8,
-        shadowRadius: 8,
+        // Shadow
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.15,
+        shadowRadius: 20,
+        elevation: 10,
     },
-    accuracyBadge: {
-        backgroundColor: 'rgba(255, 255, 255, 0.25)',
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 16,
-        alignSelf: 'center',
-        borderWidth: 2,
-        borderColor: 'rgba(255, 255, 255, 0.4)',
+
+    /* Header */
+    header: {
+        paddingVertical: 18,
+        paddingHorizontal: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
     },
-    accuracyText: {
-        fontSize: 20,
+    headerEmoji: {
+        fontSize: 44,
+    },
+    headerMessage: {
+        flex: 1,
+        fontSize: 18,
         fontWeight: '800',
         color: '#FFFFFF',
-        textShadowColor: 'rgba(0, 0, 0, 0.3)',
-        textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 2,
+        lineHeight: 24,
     },
-    decorativeCircle: {
-        position: 'absolute',
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        top: -20,
-        right: -20,
+    scorePill: {
+        backgroundColor: 'rgba(255,255,255,0.25)',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 20,
+        borderWidth: 1.5,
+        borderColor: 'rgba(255,255,255,0.5)',
     },
-    glow: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        borderRadius: 28,
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.6,
-        shadowRadius: 24,
+    scorePillText: {
+        color: '#fff',
+        fontWeight: '900',
+        fontSize: 16,
+    },
+
+    /* Body */
+    body: {
+        backgroundColor: '#F8FAFC',
+        padding: 16,
+        gap: 14,
+    },
+    section: {
+        gap: 8,
+    },
+    sectionTitle: {
+        fontSize: 11,
+        fontWeight: '800',
+        color: '#94A3B8',
+        textTransform: 'uppercase',
+        letterSpacing: 1.2,
+    },
+
+    /* Phoneme chips */
+    chipsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    chip: {
+        paddingHorizontal: 14,
+        paddingVertical: 7,
+        borderRadius: 20,
+        borderWidth: 1.5,
+    },
+    chipText: {
+        fontSize: 16,
+        fontWeight: '900',
+    },
+
+    /* Hint */
+    hintBanner: {
+        backgroundColor: '#EFF6FF',
+        borderRadius: 14,
+        padding: 12,
+        borderLeftWidth: 4,
+        borderLeftColor: '#3B82F6',
+    },
+    hintText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#1E40AF',
+    },
+
+    /* Metric cards */
+    metricCard: {
+        borderRadius: 14,
+        padding: 12,
+        gap: 8,
+    },
+    metricHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    metricIcon: {
+        fontSize: 18,
+    },
+    metricLabel: {
+        fontSize: 14,
+        fontWeight: '800',
+        flex: 1,
+    },
+    metricBadge: {
+        paddingHorizontal: 10,
+        paddingVertical: 3,
+        borderRadius: 20,
+        backgroundColor: 'rgba(255,255,255,0.7)',
+    },
+    metricBadgeText: {
+        fontSize: 12,
+        fontWeight: '800',
+    },
+    metricTrack: {
+        height: 8,
+        backgroundColor: 'rgba(0,0,0,0.08)',
+        borderRadius: 4,
+        overflow: 'hidden',
+    },
+    metricFill: {
+        height: '100%',
+        borderRadius: 4,
     },
 });
