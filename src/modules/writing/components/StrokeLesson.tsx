@@ -297,6 +297,7 @@ export default function StrokeLesson({
       playSuccess();
     },
     onFail: () => {
+      playSad();
       if (onFail) onFail();
     },
   });
@@ -383,22 +384,21 @@ export default function StrokeLesson({
     }
   }, [gameState, bobAnim]);
 
-  // Reset Milo position when expectedPath changes
-  useEffect(() => {
-    miloX.value = withSpring(initMiloX, { damping: 14, stiffness: 120 });
-    miloY.value = withSpring(initMiloY, { damping: 14, stiffness: 120 });
-    startGlobalTimer();
-  }, [expectedPath, initMiloX, initMiloY, miloX, miloY, startGlobalTimer]);
-
   // ── Audio ──────────────────────────────────────────────────────────────────
-  const successSound = useAudioPlayer(
-    "https://www.soundjay.com/buttons/sounds/button-09.mp3",
-  );
+  const successSound = useAudioPlayer(require("../../../../assets/writing_module_sounds/hip hip hurray.mp3"));
+  const sadSound = useAudioPlayer(require("../../../../assets/writing_module_sounds/sad.mp3"));
+
   const playSuccess = useCallback(() => {
     try {
       successSound.play();
     } catch (_) {}
   }, [successSound]);
+
+  const playSad = useCallback(() => {
+    try {
+      sadSound.play();
+    } catch (_) {}
+  }, [sadSound]);
 
   // ── Reset ──────────────────────────────────────────────────────────────────
   const resetScene = useCallback(() => {
@@ -417,7 +417,6 @@ export default function StrokeLesson({
     .onUpdate((e) => {
       handleTouchMove(e.x, e.y);
 
-      // Move Milo with finger
       if (miloStartNorm && miloEndNorm) {
         switch (strokeType) {
           case "vertical":
@@ -465,7 +464,6 @@ export default function StrokeLesson({
       handleTouchEnd();
     });
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <GestureHandlerRootView style={styles.root}>
       {!hideHeader && title && (
@@ -475,7 +473,15 @@ export default function StrokeLesson({
       )}
 
       <GestureDetector gesture={panGesture}>
-        <View style={styles.canvasWrapper} onLayout={(e) => setCanvasDim({ W: e.nativeEvent.layout.width, H: e.nativeEvent.layout.height })}>
+        <View
+          style={styles.canvasWrapper}
+          onLayout={(e) =>
+            setCanvasDim({
+              W: e.nativeEvent.layout.width,
+              H: e.nativeEvent.layout.height,
+            })
+          }
+        >
           {W > 0 && H > 0 && (
             <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
               {children && children({ drawnPoints, gameState, accuracy, W, H })}

@@ -82,8 +82,8 @@ export default function LetterRecognitionGame({
         setGameState('idle');
     }, [miloStartNorm, options, correctId, miloX, miloY]);
 
-    const correctSound = useAudioPlayer('https://www.soundjay.com/buttons/sounds/button-09.mp3');
-    const wrongSound = useAudioPlayer('https://freesound.org/data/previews/173/173934_311243-lq.mp3');
+    const correctSound = useAudioPlayer(require('../../../../assets/writing_module_sounds/hip hip hurray.mp3'));
+    const wrongSound = useAudioPlayer(require('../../../../assets/writing_module_sounds/sad.mp3'));
 
     const playSound = (type: 'correct' | 'wrong') => {
         try {

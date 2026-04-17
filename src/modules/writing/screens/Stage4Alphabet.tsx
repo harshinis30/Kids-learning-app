@@ -26,14 +26,14 @@ import {
     useWindowDimensions,
 } from "react-native";
 import Svg, {
-    Circle,
-    Defs,
-    Ellipse,
-    G,
-    Path,
-    Rect,
-    Stop,
-    LinearGradient as SvgLinearGradient,
+  Circle,
+  Defs,
+  Ellipse,
+  G,
+  Path,
+  Rect,
+  Stop,
+  LinearGradient as SvgLinearGradient,
 } from "react-native-svg";
 import { computeAccuracy } from "../utils/accuracy.js";
 import { canProgress, getFeedback } from "../utils/scoring.js";
@@ -41,10 +41,7 @@ import { Stage2WorldScenery } from "./Stage3Recognition";
 import StoryIntro from "./StoryIntro";
 import { useWritingCompletion } from "./WritingLevelHub";
 import { PauseOverlay } from "../components/shared/PauseOverlay";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-// Dimensions handled dynamically via useWindowDimensions
+import { useAudioPlayer } from "expo-audio";
 
 
 
@@ -730,11 +727,24 @@ function DrawingCanvas({
   const [showKeyDots, setShowKeyDots] = useState(true);
   const [isDrawing, setIsDrawing] = useState(false);
   const [completed, setCompleted] = useState(false);
+  const [readyToSubmit, setReadyToSubmit] = useState(false);
+  const readyToSubmitRef = useRef(false);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<{
     message: string;
     emoji: string;
   } | null>(null);
+
+  const successSound = useAudioPlayer(require('../../../../assets/writing_module_sounds/hip hip hurray.mp3'));
+  const sadSound = useAudioPlayer(require('../../../../assets/writing_module_sounds/sad.mp3'));
+
+  const playSuccess = useCallback(() => {
+    try { successSound.play(); } catch (_) { }
+  }, [successSound]);
+
+  const playSad = useCallback(() => {
+    try { sadSound.play(); } catch (_) { }
+  }, [sadSound]);
 
   // Refs for PanResponder (critical — same pattern as Stage 2)
   const phaseRef = useRef(phase);
@@ -746,6 +756,9 @@ function DrawingCanvas({
   useEffect(() => {
     completedRef.current = completed;
   }, [completed]);
+  useEffect(() => {
+    readyToSubmitRef.current = readyToSubmit;
+  }, [readyToSubmit]);
   useEffect(() => {
     starsEarnedRef.current = starsEarned;
   }, [starsEarned]);
@@ -838,6 +851,8 @@ function DrawingCanvas({
     setDrawnPath("");
     drawnPointsRef.current = [];
     allDrawnPointsRef.current = [];
+    setReadyToSubmit(false);
+    readyToSubmitRef.current = false;
     demoTrailRef.current = "";
     setDemoTrailPath("");
 
@@ -983,7 +998,7 @@ function DrawingCanvas({
       // If d < 8: last keyPoint is already at start — keep it
     }
     return pts;
-  }, [level]);
+  }, [level, LETTER_OX, LETTER_OY, LETTER_SIZE]);
 
   const [nextCpIdx, setNextCpIdx] = useState(0);
   const [reachedCps, setReachedCps] = useState<Set<number>>(new Set());
@@ -1090,39 +1105,16 @@ function DrawingCanvas({
           return;
         }
 
-        // All checkpoints reached — defer evaluation by 25s inactivity timer
-        const doEvaluate = () => {
-          const normalizedDrawn = allDrawnPointsRef.current.map((pt) => ({
-            x: (pt.x - LETTER_OX) / LETTER_SIZE,
-            y: (pt.y - LETTER_OY) / LETTER_SIZE,
-          }));
-          const acc = computeAccuracy(
-            normalizedDrawn,
-            level.guidePath,
-            { width: LETTER_SIZE, height: LETTER_SIZE },
-            { toleranceMultiplier: 1.5 },
-          );
-          const fb = getFeedback(acc);
-          const passes = canProgress(acc);
-
-          setAccuracy(acc);
-          setFeedback(fb);
-
-          if (passes) {
-            const earnedStars = acc >= 90 ? 3 : acc >= 70 ? 2 : 1;
-            setCompleted(true);
-            setStarsEarned(earnedStars);
-            setMiloState("complete");
-            setShowConfetti(true);
-            setTimeout(() => {
-              onComplete(earnedStars);
-            }, 2500);
-          } else {
-            setMiloState("offpath");
-          }
-        };
-
-        startPauseTimer(doEvaluate);
+        // All checkpoints reached — show "Done" button, let kid keep drawing
+        if (!readyToSubmitRef.current) {
+          setReadyToSubmit(true);
+          readyToSubmitRef.current = true;
+          setMiloState("segment");
+          setTimeout(() => setMiloState("idle"), 1500);
+        } else {
+          setMiloState("good");
+          setTimeout(() => setMiloState("idle"), 1000);
+        }
       },
     }),
   ).current;
@@ -1193,7 +1185,7 @@ function DrawingCanvas({
           />
         </Svg>
 
-        {/* Ghost stencil / guide path */}
+        {/* Guide path — same dashed mint line as Stage 2 */}
         {showGuide && (
           <Svg
             width={CANVAS_W}
@@ -1201,17 +1193,6 @@ function DrawingCanvas({
             style={StyleSheet.absoluteFill}
             pointerEvents="none"
           >
-            {/* Thick ghost letter */}
-            <Path
-              d={guideSvgPath}
-              stroke="#D7CCC8"
-              strokeWidth={28}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-              opacity={0.35}
-            />
-            {/* Dashed guide on top */}
             <Path
               d={guideSvgPath}
               stroke={PAL.mint}
@@ -1429,7 +1410,9 @@ function DrawingCanvas({
             ? "👀 Watch the path!"
             : showingHint
               ? "👀 Follow the sparkle!"
-              : `✏️ Trace the letter ${level.letter}!`}
+              : readyToSubmit && !completed
+                ? `✏️ Keep tracing or tap Done!`
+                : `✏️ Trace the letter ${level.letter}!`}
         </Text>
       </View>
 
@@ -1453,6 +1436,76 @@ function DrawingCanvas({
           <Text style={{ fontSize: 22 }}>🔄</Text>
           <Text style={s.controlLabel}>Demo</Text>
         </TouchableOpacity>
+
+        {/* Clear button — reset strokes to try again without restarting demo */}
+        {!completed && drawnPath !== "" && (
+          <TouchableOpacity
+            style={s.controlBtn}
+            onPress={() => {
+              drawnPointsRef.current = [];
+              allDrawnPointsRef.current = [];
+              drawnPathRef.current = "";
+              setDrawnPath("");
+              setReadyToSubmit(false);
+              readyToSubmitRef.current = false;
+              setAccuracy(null);
+              setFeedback(null);
+              setMiloState("idle");
+              nextCpIdxRef.current = 0;
+              reachedCpsRef.current = new Set();
+              setNextCpIdx(0);
+              setReachedCps(new Set());
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={{ fontSize: 22 }}>🧹</Text>
+            <Text style={s.controlLabel}>Clear</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Done button — submit drawing for accuracy evaluation */}
+        {readyToSubmit && !completed && (
+          <TouchableOpacity
+            style={[s.controlBtn, s.controlBtnDone]}
+            onPress={() => {
+              clearPauseTimer();
+              const normalizedDrawn = allDrawnPointsRef.current.map((pt) => ({
+                x: (pt.x - LETTER_OX) / LETTER_SIZE,
+                y: (pt.y - LETTER_OY) / LETTER_SIZE,
+              }));
+              const acc = computeAccuracy(
+                normalizedDrawn,
+                level.guidePath,
+                { width: LETTER_SIZE, height: LETTER_SIZE },
+                { toleranceMultiplier: 1.5 },
+              );
+              const fb = getFeedback(acc);
+              const passes = canProgress(acc);
+
+              setAccuracy(acc);
+              setFeedback(fb);
+
+              if (passes) {
+                playSuccess();
+                const earnedStars = acc >= 90 ? 3 : acc >= 70 ? 2 : 1;
+                setCompleted(true);
+                setStarsEarned(earnedStars);
+                setMiloState("complete");
+                setShowConfetti(true);
+                setTimeout(() => {
+                  onComplete(earnedStars);
+                }, 2500);
+              } else {
+                playSad();
+                setMiloState("offpath");
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={{ fontSize: 22 }}>✅</Text>
+            <Text style={[s.controlLabel, { color: PAL.white }]}>Done</Text>
+          </TouchableOpacity>
+        )}
 
         {completed && (
           <TouchableOpacity
@@ -1509,6 +1562,8 @@ function DrawingCanvas({
               allDrawnPointsRef.current = [];
               drawnPathRef.current = "";
               setDrawnPath("");
+              setReadyToSubmit(false);
+              readyToSubmitRef.current = false;
               setAccuracy(null);
               setFeedback(null);
               setMiloState("idle");
@@ -1984,6 +2039,14 @@ const s = StyleSheet.create({
     elevation: 3,
   },
   controlBtnPrimary: { backgroundColor: PAL.sun },
+  controlBtnDone: {
+    backgroundColor: "#4CD964",
+    shadowColor: "#4CD964",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 5,
+  },
   controlLabel: { fontSize: 13, fontWeight: "800", color: PAL.brown },
 
   // Star slots

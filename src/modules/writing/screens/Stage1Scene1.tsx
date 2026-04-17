@@ -463,66 +463,14 @@ function Stage1Gameplay() {
         }
     }, [gameState, bobAnim]);
 
-    const player = useAudioPlayer('https://www.soundjay.com/buttons/sounds/button-09.mp3');
+    const successSound = useAudioPlayer(require('../../../../assets/writing_module_sounds/hip hip hurray.mp3'));
+    const sadSound = useAudioPlayer(require('../../../../assets/writing_module_sounds/sad.mp3'));
 
     const playSuccess = useCallback(() => {
         try {
-            player.play();
+            successSound.play();
         } catch (_) { /* ignore browser unready issues */ }
-    }, [player]);
-
-    const forceEvaluate = useCallback(() => {
-        if (gameState !== 'drawing' && gameState !== 'idle') return;
-        if (globalTimerRef.current) clearInterval(globalTimerRef.current);
-
-        // Evaluate even if no points drawn
-        const acc = allDrawnPointsRef.current.length > 0
-            ? computeAccuracy(allDrawnPointsRef.current, expectedPath, DIMS)
-            : 0;
-
-        const fb = getFeedback(acc);
-        const progresses = canProgress(acc);
-
-        setAccuracy(acc);
-        setFeedback(fb);
-
-        if (progresses) {
-            miloX.value = withSpring(scene.miloEndNorm.x * W - MILO_SIZE / 2, { damping: 12, stiffness: 100 });
-            miloY.value = withSpring(scene.miloEndNorm.y * H - MILO_SIZE / 2, { damping: 12, stiffness: 100 });
-            setGameState('success');
-            playSuccess();
-        } else {
-            setGameState('fail');
-        }
-    }, [allDrawnPointsRef.current, expectedPath, DIMS, gameState, miloX, miloY, playSuccess, scene, W, H]);
-
-    const startGlobalTimer = useCallback(() => {
-        if (globalTimerRef.current) clearInterval(globalTimerRef.current);
-        setGlobalCountdown(30);
-        globalTimerRef.current = setInterval(() => {
-            setGlobalCountdown(prev => {
-                if (prev <= 1) {
-                    if (globalTimerRef.current) clearInterval(globalTimerRef.current);
-                    forceEvaluate();
-                    return 0;
-                }
-                return prev - 1;
-            });
-        }, 1000);
-    }, [forceEvaluate]);
-
-    // Handle timer initialization when idle (e.g. at start of scene)
-    useEffect(() => {
-        if (gameState === 'idle') {
-            startGlobalTimer();
-        }
-    }, [gameState, startGlobalTimer]);
-
-    useEffect(() => {
-        return () => {
-            if (globalTimerRef.current) clearInterval(globalTimerRef.current);
-        };
-    }, []);
+    }, [successSound]);
 
     const resetScene = useCallback(() => {
         drawnPointsRef.current = [];
@@ -597,8 +545,42 @@ function Stage1Gameplay() {
         .onEnd(() => {
             // MULTI-STROKE: Accumulate this stroke's points
             allDrawnPointsRef.current = allDrawnPointsRef.current.concat(drawnPointsRef.current);
-            // Wait for 30s timer or "Done ✅" manual evaluation
+
+            const acc = computeAccuracy(allDrawnPointsRef.current, expectedPath, DIMS);
+            const fb = getFeedback(acc);
+            const progresses = canProgress(acc);
+
+            setAccuracy(acc);
+            setFeedback(fb);
+
+            if (progresses) {
+                miloX.value = withSpring(scene.miloEndNorm.x * W - MILO_SIZE / 2, { damping: 12, stiffness: 100 });
+                miloY.value = withSpring(scene.miloEndNorm.y * H - MILO_SIZE / 2, { damping: 12, stiffness: 100 });
+                setGameState('success');
+                playSuccess();
+            } else {
+                setGameState('fail');
+            }
         });
+
+    const forceEvaluate = useCallback(() => {
+        if (allDrawnPointsRef.current.length === 0) return;
+        const acc = computeAccuracy(allDrawnPointsRef.current, expectedPath, DIMS);
+        const fb = getFeedback(acc);
+        const progresses = canProgress(acc);
+
+        setAccuracy(acc);
+        setFeedback(fb);
+
+        if (progresses) {
+            miloX.value = withSpring(scene.miloEndNorm.x * W - MILO_SIZE / 2, { damping: 12, stiffness: 100 });
+            miloY.value = withSpring(scene.miloEndNorm.y * H - MILO_SIZE / 2, { damping: 12, stiffness: 100 });
+            setGameState('success');
+            playSuccess();
+        } else {
+            setGameState('fail');
+        }
+    }, [expectedPath, DIMS, scene, miloX, miloY, playSuccess]);
 
     const strokeColor = TRAIL_COLORS[colorIndex % TRAIL_COLORS.length];
 

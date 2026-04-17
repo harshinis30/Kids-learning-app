@@ -344,6 +344,7 @@ function RoadSign({
     disabled,
     wiggle,
     correct,
+    hintGlow,
 }: {
     label: string;
     color: string;
@@ -351,10 +352,13 @@ function RoadSign({
     disabled: boolean;
     wiggle: boolean;
     correct: boolean;
+    hintGlow: boolean;
 }) {
     const [pressAnim] = useState(new Animated.Value(1));
     const [wiggleAnim] = useState(new Animated.Value(0));
     const [glowAnim] = useState(new Animated.Value(0));
+    const [hintGlowAnim] = useState(new Animated.Value(0));
+    const [hintScaleAnim] = useState(new Animated.Value(1));
 
     useEffect(() => {
         if (wiggle) {
@@ -378,6 +382,27 @@ function RoadSign({
             ).start();
         }
     }, [correct, glowAnim]);
+
+    // Hint glow — visible pulsing to attract attention to the correct sign
+    useEffect(() => {
+        if (hintGlow) {
+            Animated.loop(
+                Animated.sequence([
+                    Animated.timing(hintGlowAnim, { toValue: 0.7, duration: 900, useNativeDriver: true }),
+                    Animated.timing(hintGlowAnim, { toValue: 0.2, duration: 900, useNativeDriver: true }),
+                ])
+            ).start();
+            Animated.loop(
+                Animated.sequence([
+                    Animated.timing(hintScaleAnim, { toValue: 1.08, duration: 900, useNativeDriver: true }),
+                    Animated.timing(hintScaleAnim, { toValue: 1.0, duration: 900, useNativeDriver: true }),
+                ])
+            ).start();
+        } else {
+            hintGlowAnim.setValue(0);
+            hintScaleAnim.setValue(1);
+        }
+    }, [hintGlow, hintGlowAnim, hintScaleAnim]);
 
     const handlePressIn = () => {
         Animated.spring(pressAnim, { toValue: 0.92, friction: 5, useNativeDriver: true }).start();
@@ -416,12 +441,16 @@ function RoadSign({
                 <View style={styles.signPost} />
 
                 {/* Sign plate */}
-                <View style={[styles.signPlate, { backgroundColor: color }]}>
+                <Animated.View style={[styles.signPlate, { backgroundColor: color, transform: [{ scale: hintGlow ? hintScaleAnim : 1 }] }]}>
                     {correct && (
                         <Animated.View style={[styles.signGlow, { opacity: glowAnim }]} />
                     )}
+                    {/* Subtle hint glow overlay for the correct answer */}
+                    {hintGlow && (
+                        <Animated.View style={[styles.signHintGlow, { opacity: hintGlowAnim }]} />
+                    )}
                     <Text style={styles.signLetter}>{label}</Text>
-                </View>
+                </Animated.View>
             </Animated.View>
         </TouchableOpacity>
     );
@@ -794,9 +823,14 @@ function Stage3Gameplay() {
             {/* Top: Progress + Stars */}
             <ProgressDots total={TOTAL_ROUNDS} current={currentRound} stars={stars} />
 
-            {/* Prompt Banner */}
+            {/* Target Letter Display — shows the letter the child needs to find */}
             <View style={styles.promptBanner}>
-                <Text style={styles.promptText}>{round.prompt}</Text>
+                <View style={styles.targetLetterCard}>
+                    <Text style={styles.targetLetterSmallLabel}>
+                        {round.type === 'odd_one_out' ? 'Tap the different one!' : round.type === 'case_match' ? `Match this letter` : 'Find this letter'}
+                    </Text>
+                    <Text style={styles.targetLetterBig}>{round.targetLetter}</Text>
+                </View>
             </View>
 
             {/* Milo (center-left of road) */}
@@ -816,6 +850,7 @@ function Stage3Gameplay() {
                             disabled={interactionLocked}
                             wiggle={wiggleSignIds.includes(opt.id)}
                             correct={correctSignId === opt.id}
+                            hintGlow={!interactionLocked && correctSignId === null && opt.id === round.correctId}
                         />
                     </View>
                 ))}
@@ -891,30 +926,43 @@ const styles = StyleSheet.create({
         fontSize: 22,
     },
 
-    // Prompt
+    // Prompt — now a target letter showcase card
     promptBanner: {
         position: 'absolute',
-        top: 90,
+        top: 80,
         left: 20,
         right: 20,
         alignItems: 'center',
         zIndex: 20,
     },
-    promptText: {
-        fontSize: 22,
+    targetLetterCard: {
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderRadius: 28,
+        paddingHorizontal: 36,
+        paddingVertical: 12,
+        alignItems: 'center',
+        shadowColor: '#FFD700',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 14,
+        elevation: 8,
+        borderWidth: 3,
+        borderColor: 'rgba(255,215,0,0.5)',
+    },
+    targetLetterSmallLabel: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#8D6E63',
+        marginBottom: 2,
+        letterSpacing: 0.5,
+    },
+    targetLetterBig: {
+        fontSize: 60,
         fontWeight: '900',
         color: PALETTE.textDark,
-        backgroundColor: 'rgba(255,255,255,0.9)',
-        paddingHorizontal: 24,
-        paddingVertical: 14,
-        borderRadius: 30,
-        overflow: 'hidden',
-        textAlign: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.15,
-        shadowRadius: 6,
-        elevation: 4,
+        textShadowColor: 'rgba(255,215,0,0.4)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 8,
     },
 
     // Milo zone
@@ -1019,6 +1067,22 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFillObject,
         borderRadius: 18,
         backgroundColor: PALETTE.sun,
+    },
+    signHintGlow: {
+        position: 'absolute',
+        top: -6,
+        left: -6,
+        right: -6,
+        bottom: -6,
+        borderRadius: 22,
+        backgroundColor: '#FFD700',
+        borderWidth: 3,
+        borderColor: '#FFC107',
+        shadowColor: '#FFD700',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 1,
+        shadowRadius: 24,
+        elevation: 12,
     },
     signLetter: {
         fontSize: 50,

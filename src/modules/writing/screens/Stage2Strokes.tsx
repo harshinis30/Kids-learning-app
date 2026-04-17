@@ -25,6 +25,7 @@ import Svg, { Circle, Defs, Ellipse, G, LinearGradient as SvgLinearGradient, Pat
 import { computeAccuracy } from '../utils/accuracy.js';
 import { canProgress, getFeedback } from '../utils/scoring.js';
 import { useWritingCompletion } from './WritingLevelHub';
+import { useAudioPlayer } from 'expo-audio';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -311,59 +312,7 @@ function LevelBubble({
     );
 }
 
-// ── Milo Reactions ────────────────────────────────────────────────────────────
 
-type MiloState = 'idle' | 'demo' | 'good' | 'offpath' | 'segment' | 'complete' | 'star' | 'nudge' | 'boss';
-
-function MiloReactor({ state }: { state: MiloState }) {
-    const [bounceAnim] = useState(new Animated.Value(0));
-    const [scaleAnim] = useState(new Animated.Value(1));
-
-    useEffect(() => {
-        Animated.loop(
-            Animated.sequence([
-                Animated.timing(bounceAnim, { toValue: -10, duration: 600, useNativeDriver: true }),
-                Animated.timing(bounceAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
-            ])
-        ).start();
-    }, [bounceAnim]);
-
-    useEffect(() => {
-        if (state === 'complete' || state === 'star' || state === 'boss') {
-            Animated.sequence([
-                Animated.spring(scaleAnim, { toValue: 1.4, friction: 3, useNativeDriver: true }),
-                Animated.spring(scaleAnim, { toValue: 1, friction: 4, useNativeDriver: true }),
-            ]).start();
-        } else if (state === 'segment') {
-            Animated.sequence([
-                Animated.spring(scaleAnim, { toValue: 1.2, friction: 3, useNativeDriver: true }),
-                Animated.spring(scaleAnim, { toValue: 1, friction: 4, useNativeDriver: true }),
-            ]).start();
-        }
-    }, [state, scaleAnim]);
-
-    const emojiMap: Record<MiloState, string> = {
-        idle: '🐵', demo: '👉', good: '👍', offpath: '🤔',
-        segment: '👏', complete: '🙌', star: '🌟', nudge: '👋', boss: '🕺',
-    };
-    const speechMap: Record<MiloState, string> = {
-        idle: '', demo: '👀', good: '✨', offpath: '❓',
-        segment: '⭐', complete: '🎉', star: '⭐', nudge: '☝️', boss: '🏆',
-    };
-
-    return (
-        <View style={s.miloZone} pointerEvents="none">
-            {speechMap[state] !== '' && (
-                <View style={s.miloBubble}>
-                    <Text style={{ fontSize: 18 }}>{speechMap[state]}</Text>
-                </View>
-            )}
-            <Animated.View style={{ transform: [{ translateY: bounceAnim }, { scale: scaleAnim }] }}>
-                <Text style={{ fontSize: 55 }}>{emojiMap[state]}</Text>
-            </Animated.View>
-        </View>
-    );
-}
 
 // ── Sparkle Guide (colorful pulsing tip for demo & guided phases) ─────────────
 // Child psychology: golden glow = achievement & warmth, universally positive
@@ -492,7 +441,7 @@ function DrawingCanvas({
     onStarEarned: (starNum: number) => void;
 }) {
     const [phase, setPhase] = useState<Phase>('demo');
-    const [miloState, setMiloState] = useState<MiloState>('idle');
+
     const [drawnPath, setDrawnPath] = useState('');
     const drawnPathRef = useRef(''); // Instant sync — avoids React batching SVG parse errors
     const [starsEarned, setStarsEarned] = useState(0);
@@ -509,6 +458,17 @@ function DrawingCanvas({
     const [completed, setCompleted] = useState(false);
     const [accuracy, setAccuracy] = useState<number | null>(null);
     const [feedback, setFeedback] = useState<{ message: string; emoji: string } | null>(null);
+
+    const successSound = useAudioPlayer(require('../../../../assets/writing_module_sounds/hip hip hurray.mp3'));
+    const sadSound = useAudioPlayer(require('../../../../assets/writing_module_sounds/sad.mp3'));
+
+    const playSuccess = useCallback(() => {
+        try { successSound.play(); } catch (_) { }
+    }, [successSound]);
+
+    const playSad = useCallback(() => {
+        try { sadSound.play(); } catch (_) { }
+    }, [sadSound]);
 
     // *** CRITICAL: Use refs so PanResponder always reads latest state ***
     const phaseRef = useRef<Phase>(phase);
@@ -539,7 +499,6 @@ function DrawingCanvas({
 
     const runDemo = useCallback(() => {
         setPhase('demo');
-        setMiloState('demo');
         setSparkleVisible(true);
         setDemoProgress(0);
         drawnPathRef.current = '';
@@ -562,7 +521,6 @@ function DrawingCanvas({
             if (step >= total) {
                 if (demoTimerRef.current) clearInterval(demoTimerRef.current);
                 setSparkleVisible(false);
-                setMiloState('idle');
                 // Keep trail visible briefly, then clear and switch to guided
                 setTimeout(() => {
                     demoTrailRef.current = '';
@@ -631,7 +589,6 @@ function DrawingCanvas({
         if (hintPoints.length < 2) return;
 
         setShowingHint(true);
-        setMiloState('demo');
         hintTrailRef.current = '';
         setHintTrailPath('');
         setSparkleVisible(true);
@@ -649,8 +606,6 @@ function DrawingCanvas({
                 // Keep hint trail visible briefly then clear
                 setTimeout(() => {
                     stopHint();
-                    setMiloState('nudge');
-                    setTimeout(() => setMiloState('idle'), 1500);
                 }, 800);
                 return;
             }
@@ -746,7 +701,6 @@ function DrawingCanvas({
                 onPathCountRef.current = 0;
                 totalPointsRef.current = 0;
                 setIsDrawing(true);
-                setMiloState('idle');
                 // Stop any hint animation when kid starts drawing
                 if (hintTimerRef.current) { clearInterval(hintTimerRef.current); hintTimerRef.current = null; }
                 hintTrailRef.current = '';
@@ -765,6 +719,7 @@ function DrawingCanvas({
                     drawnPathRef.current += ` L ${clampedX} ${clampedY}`;
                 }
                 setDrawnPath(drawnPathRef.current);
+
                 totalPointsRef.current++;
 
                 // Sequential checkpoint detection
@@ -780,7 +735,7 @@ function DrawingCanvas({
                         const newCp = curCp + 1;
                         nextCpIdxRef.current = newCp;
                         setNextCpIdx(newCp);
-                        setMiloState('segment');
+
                         // Guide monkey to next checkpoint
                         if (newCp < effectiveCheckpoints.length && phaseRef.current === 'guided') {
                             const next = effectiveCheckpoints[newCp];
@@ -801,11 +756,10 @@ function DrawingCanvas({
                 const totalCps = effectiveCheckpoints.length;
                 const reached = reachedCpsRef.current.size;
 
-                if (reached === 0) { setMiloState('nudge'); return; }
+                if (reached === 0) { return; }
                 // Still have checkpoints to reach — show encouraging feedback, let them keep drawing
                 if (reached < totalCps) {
-                    setMiloState('good');
-                    setTimeout(() => setMiloState('idle'), 1500);
+
                     return;
                 }
 
@@ -828,6 +782,7 @@ function DrawingCanvas({
 
                 if (passes) {
                     setCompleted(true);
+                    playSuccess();
                     // Award stars based on accuracy
                     const earnedStars = acc >= 90 ? 3 : acc >= 70 ? 2 : 1;
                     setStarsEarned(earnedStars);
@@ -835,12 +790,12 @@ function DrawingCanvas({
                         const idx = i;
                         setTimeout(() => onStarEarned(idx), (idx - 1) * 400);
                     }
-                    setMiloState(level.id === 9 ? 'boss' : 'complete');
+
                     setShowConfetti(true);
                     setTimeout(() => { onComplete(earnedStars); }, 2500);
                 } else {
                     // Accuracy too low — show fail overlay, allow retry
-                    setMiloState('offpath');
+                    playSad();
                 }
             },
         })
@@ -995,8 +950,7 @@ function DrawingCanvas({
                 </Text>
             </View>
 
-            {/* Milo */}
-            <MiloReactor state={miloState} />
+
 
             {/* Controls */}
             <View style={s.canvasControls}>
@@ -1053,7 +1007,7 @@ function DrawingCanvas({
                             setDrawnPath('');
                             setAccuracy(null);
                             setFeedback(null);
-                            setMiloState('idle');
+
                             nextCpIdxRef.current = 0;
                             reachedCpsRef.current = new Set();
                             setNextCpIdx(0);
